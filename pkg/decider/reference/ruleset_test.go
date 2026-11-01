@@ -308,7 +308,7 @@ rules:
 	if cool.Verdict != quelor.Defer || cool.WakeAfter != 30*time.Second || len(cool.Ops) != 0 {
 		t.Fatalf("cool rule %+v", cool)
 	}
-	if rs.Hash() == "" || rs.Hash() != rs.Hash() {
+	if h1, h2 := rs.Hash(), rs.Hash(); h1 == "" || h1 != h2 {
 		t.Fatalf("hash %q", rs.Hash())
 	}
 }

@@ -372,7 +372,7 @@ func TestDurationCodec(t *testing.T) {
 	if back != 0 {
 		t.Fatalf("null %s", back)
 	}
-	var cleared Duration = Duration(time.Second)
+	cleared := Duration(time.Second)
 	nullNode := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null", Value: "null"}
 	if err := cleared.UnmarshalYAML(nullNode); err != nil {
 		t.Fatal(err)

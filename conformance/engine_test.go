@@ -135,7 +135,9 @@ func newTestEngine(t *testing.T, spec Spec) quelor.LeaseAPI {
 		if p, ok := mapUnknownPolicy(rs.UnknownPolicy); ok {
 			m.UnknownPolicy = p
 		}
-		reg.Register(m, resource.NewStaticReader(staticReading(rs, now())))
+		// Some cases register deliberately invalid manifests and assert the
+		// engine refuses them later, so a registration error is expected here.
+		_ = reg.Register(m, resource.NewStaticReader(staticReading(rs, now())))
 	}
 	maxLeases := spec.HolderMaxLeases
 	if maxLeases <= 0 {

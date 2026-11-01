@@ -599,7 +599,9 @@ func openEngine(clock func() time.Time, ttl time.Duration, manifests ...resource
 	reg := resource.NewRegistry(clock)
 	for _, m := range manifests {
 		m.WithDefaults()
-		reg.Register(m, nil)
+		if err := reg.Register(m, nil); err != nil {
+			return nil, err
+		}
 	}
 	return engine.New(engine.Config{
 		Registry: reg,

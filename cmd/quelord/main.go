@@ -97,7 +97,9 @@ func run() (code int) {
 			fmt.Fprintf(os.Stderr, "quelord: shutdown: %v\n", err)
 			return 1
 		}
-		<-serveDone
+		if err := <-serveDone; err != nil {
+			fmt.Fprintln(os.Stderr, "quelord: serve:", err)
+		}
 		return 0
 	case err := <-serveDone:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {

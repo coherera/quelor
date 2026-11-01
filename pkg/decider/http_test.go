@@ -190,7 +190,7 @@ func TestHTTPClientTransportCases(t *testing.T) {
 			if tc.mode == "bad-url" {
 				c.URL = "://bad"
 			}
-			var call *HTTPClient = c
+			call := c
 			if tc.mode == "nil-receiver" {
 				call = nil
 			}

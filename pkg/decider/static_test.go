@@ -76,7 +76,7 @@ func TestStaticDecisionRef(t *testing.T) {
 				t.Fatalf("ref len %d", len(resp.DecisionRef))
 			}
 			for _, c := range resp.DecisionRef {
-				if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+				if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 					t.Fatalf("non-hex ref %q", resp.DecisionRef)
 				}
 			}
