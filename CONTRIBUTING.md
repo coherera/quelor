@@ -5,6 +5,8 @@ small and tested.
 
 ## Dev loop
 
+Go 1.26 or newer (`go 1.26.0` in `go.mod`).
+
 ```
 go build ./... && go test ./... && go vet ./...
 go test -bench . ./bench/
@@ -37,5 +39,5 @@ triage it (label, accept, decline, or ask for more information) within
 
 ## Pull requests
 
-Open a draft PR early. Fill in the template. A maintainer reviews; CI must pass.
+Open a draft PR early. Fill in the [pull request template](.github/PULL_REQUEST_TEMPLATE.md). A maintainer reviews; CI must pass.
 Good first issues are listed in [docs/good-first-issues.md](docs/good-first-issues.md).

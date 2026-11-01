@@ -11,13 +11,30 @@
 [![Stars](https://img.shields.io/github/stars/coherera/quelor?style=social)](https://github.com/coherera/quelor/stargazers)
 [![Conformance: candidate](https://img.shields.io/badge/conformance-candidate-lightgrey.svg)](docs/conformance.md)
 
-Read the [manifesto](https://quelor.dev/manifesto/).
+Quelor is for CI owners and agent authors whose jobs die mid-run on rate limits, budgets or quotas. Read the [manifesto](https://quelor.dev/manifesto/).
+
+## Try it in 2 minutes
+
+You need Go ([version in go.mod](go.mod)) and a GitHub token.
+
+```
+go install github.com/coherera/quelor/cmd/quelor@latest
+GITHUB_TOKEN=$(gh auth token) quelor admit --resource github_api --need 50
+```
+
+Real output from a run of this command:
+
+```
+admit github_api need=50 remaining=4823 reset=2026-11-01T09:31:10Z
+```
+
+Exit codes: `0` admit (enough budget), `42` defer (not enough budget and you passed `--optional`), `43` degraded (not enough budget for a required demand, or the reading is unknown, for example no token). Unknown is never treated as available. Add `--json` for machine output.
 
 ## The problem
 
 CI pipelines and agent sessions start work against budgets they never check: API rate windows, runner slots, model credit windows, dollar caps, and dependencies that are already down. The result is a wall of red that is not defects, paged humans who cannot fix a 429, and reruns that spend the same empty bucket twice.
 
-Quelor admits work against machine resources: API budgets, executor slots, model credit windows, dollar budgets, dependency health. Resource classes are extensible by profile.
+Quelor admits work against machine resources: API budgets, executor slots, model credit windows, dollar budgets, dependency health. Each resource is declared as a YAML manifest with one of five capacity models ([docs/resource-classes.md](docs/resource-classes.md)). The GitHub Action and `quelor admit` check one live GitHub rate-limit reading, with no daemon; `quelord` holds many resources and arbitrates between many holders.
 
 ## Quickstart (GitHub Action)
 
@@ -44,12 +61,18 @@ $ GITHUB_TOKEN=$(gh auth token) quelor admit --resource github_api --need 50
 admit github_api need=50 remaining=4950 reset=2026-10-31T15:00:00Z
 ```
 
-Exit codes: `0` admit, `42` defer (optional mode), `43` degraded (not enough budget in required mode, or the reading is unknown: unknown is never treated as available).
+Exit codes are as in "Try it in 2 minutes" above. The Action sets the `verdict` and `remaining` outputs itself and does not fail the job on `defer` or `degraded` unless you set `fail-on-defer: 'true'`; gate later steps on `steps.gate.outputs.verdict`. If no release binary is available the Action falls back to `go install`, which needs Go on the runner.
+
+**Verdict names.** The engine's lease verdicts (`ADMIT`, `DEFER`, `SHED`, `DENY`; [docs/architecture.md](docs/architecture.md)) and the Action/CLI verdicts (`admit`, `defer`, `degraded`) are separate vocabularies, because the CLI does not run the engine. `admit` and `defer` mean what `ADMIT` and `DEFER` mean; `degraded` is a refusal of a required demand or an unknown reading and has no exact engine twin (closest: `DENY`). `SHED` (dropped by coalescing) exists only in the engine.
 
 ## What it is
 
 - A **lease API**: `AcquireLease`, `RenewLease`, `SettleLease`. Admit, renew, settle, classify. See [docs/architecture.md](docs/architecture.md).
-- `quelord`: a single deterministic daemon. Floors and caps, coalescing, AIMD on observed 429/503, progressive renewal for long sessions, scarcest-resource tickets with aging, per-holder reservation quotas, authenticated holders.
+- `quelord`: a single deterministic daemon. Floors and caps, coalescing, AIMD on observed 429/503, progressive renewal for long sessions, scarcest-resource tickets with aging, per-holder reservation quotas, authenticated holders. In one line each:
+  - **AIMD** (additive increase, multiplicative decrease): an upstream 429 or 503 halves a resource's effective capacity; each success raises it by 5 percent of declared capacity ([architecture](docs/architecture.md#capacity-models-and-feedback)).
+  - **Coalescing**: units that share a `coalesce_key` do not run twice; the newcomer or the older run is shed ([architecture](docs/architecture.md)).
+  - **Tickets**: contention on a scarce resource is queued by priority rank, and rank improves with waiting (`aging_step`) so low-priority work is not starved.
+  - **Progressive renewal**: a long session holds a short lease and renews it a quantum at a time; a refused renewal tells the holder to checkpoint (`Hibernate`) instead of dying mid-run.
 - A **five-class outcome classifier**: `resource-exhausted`, `dependency-unavailable`, `flaky`, `real-defect`, `unknown`. Only `real-defect` goes red. `quelor classify` ships a default ruleset for GitHub Actions failures.
 - A **pluggable Decider** interface ([docs/decider-interface.md](docs/decider-interface.md)) with a rules-first reference Decider (YAML + CEL, [docs/policy-cel.md](docs/policy-cel.md)), content-addressed rulesets, and log-only shadow slots.
 - **Replay** (`quelor replay --trace t.jsonl --decider ref.yaml`) and a **conformance suite** ([docs/conformance.md](docs/conformance.md)), so you can prove your own Decider or engine.
@@ -67,9 +90,12 @@ Exit codes: `0` admit, `42` defer (optional mode), `43` degraded (not enough bud
 ## Run the daemon
 
 ```
+go install github.com/coherera/quelor/cmd/quelor@latest
 go install github.com/coherera/quelor/cmd/quelord@latest
-quelord -config quelord.yaml
+quelord -config examples/quelord.yaml
 ```
+
+[examples/quelord.yaml](examples/quelord.yaml) is a minimal valid config (two resources, listening on 127.0.0.1:8080); `curl 127.0.0.1:8080/healthz` confirms it is up.
 
 Endpoints: `POST /v1/lease/acquire`, `/v1/lease/renew`, `/v1/lease/settle`, `/v1/observe`, `GET /healthz`, `GET /metrics`. Resource classes are declared as YAML manifests ([docs/resource-classes.md](docs/resource-classes.md)).
 
@@ -79,7 +105,7 @@ Endpoints: `POST /v1/lease/acquire`, `/v1/lease/renew`, `/v1/lease/settle`, `/v1
 
 ## Where this leads
 
-Hosted multi-tenant cells on Octopus, and the COHERERA platform. Nothing in this repository depends on either.
+Hosted multi-tenant cells from ARAMAI. Nothing in this repository depends on them.
 
 ## Contributing
 

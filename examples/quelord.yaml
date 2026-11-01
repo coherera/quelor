@@ -1,0 +1,11 @@
+# Minimal quelord config. Run: quelord -config examples/quelord.yaml
+# Unknown fields are rejected. Resource classes: docs/resource-classes.md
+listen: 127.0.0.1:8080
+resources:
+  - id: github_api
+    capacity_model: window_bucket
+    capacity: 5000
+    window: 1h
+  - id: runner_slots
+    capacity_model: lease
+    capacity: 8
