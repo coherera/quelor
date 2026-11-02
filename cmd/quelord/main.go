@@ -18,13 +18,22 @@ import (
 )
 
 func main() {
-	os.Exit(run())
+	os.Exit(run(os.Args[1:]))
 }
 
-func run() (code int) {
-	configPath := flag.String("config", "", "path to config file")
-	showVersion := flag.Bool("version", false, "print version and exit")
-	flag.Parse()
+// notifyContext reports when the process should shut down.
+// The default watches SIGINT and SIGTERM. Tests replace it so a listener
+// can stop without a real signal.
+var notifyContext = signal.NotifyContext
+
+func run(args []string) (code int) {
+	fs := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	configPath := fs.String("config", "", "path to config file")
+	showVersion := fs.Bool("version", false, "print version and exit")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
 
 	if *showVersion {
 		fmt.Println(version.String())
@@ -88,7 +97,7 @@ func run() (code int) {
 
 	fmt.Printf("quelord listening on %s resources=%d\n", ln.Addr().String(), n)
 
-	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	sigCtx, stop := notifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	select {
@@ -97,7 +106,8 @@ func run() (code int) {
 			fmt.Fprintf(os.Stderr, "quelord: shutdown: %v\n", err)
 			return 1
 		}
-		if err := <-serveDone; err != nil {
+		// Shutdown makes Serve return ErrServerClosed. That is a clean stop.
+		if err := <-serveDone; err != nil && !errors.Is(err, http.ErrServerClosed) {
 			fmt.Fprintln(os.Stderr, "quelord: serve:", err)
 		}
 		return 0
