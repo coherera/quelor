@@ -95,6 +95,8 @@ go install github.com/coherera/quelor/cmd/quelord@latest
 quelord -config examples/quelord.yaml
 ```
 
+shared_token may be given directly or read from an environment variable via shared_token_env. Per-holder tokens may be given as a plaintext holder_tokens map, read from a YAML file via holder_tokens_file, or read from an environment variable via holder_tokens_env (JSON object or holder:token comma list). Precedence, lowest to highest: plaintext map, file, environment. Tokens are never logged.
+
 [examples/quelord.yaml](examples/quelord.yaml) is a minimal valid config (two resources, listening on 127.0.0.1:8080); `curl 127.0.0.1:8080/healthz` confirms it is up.
 
 Endpoints: `POST /v1/lease/acquire`, `/v1/lease/renew`, `/v1/lease/settle`, `/v1/observe` (same token as the lease calls), `GET /healthz`, `GET /metrics`. Resource classes are declared as YAML manifests ([docs/resource-classes.md](docs/resource-classes.md)).

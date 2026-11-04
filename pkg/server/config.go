@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,22 +20,24 @@ import (
 
 // Config is the quelord YAML document. Unknown fields are rejected.
 type Config struct {
-	Listen         string                  `yaml:"listen"`
-	Resources      []resource.Manifest     `yaml:"resources"`
-	ResourceFiles  []string                `yaml:"resource_files"`
-	Decider        DeciderConfig           `yaml:"decider"`
-	Shadows        []ShadowConfig          `yaml:"shadows"`
-	TracePath      string                  `yaml:"trace_path"`
-	SharedToken    string                  `yaml:"shared_token"`
-	SharedTokenEnv string                  `yaml:"shared_token_env"`
-	HolderTokens   map[string]string       `yaml:"holder_tokens"`
-	DefaultQuota   engine.Quota            `yaml:"default_quota"`
-	HolderQuotas   map[string]engine.Quota `yaml:"holder_quotas"`
-	LeaseTTL       string                  `yaml:"lease_ttl"`
-	TicketTTL      string                  `yaml:"ticket_ttl"`
-	AgingStep      string                  `yaml:"aging_step"`
-	DeciderTimeout string                  `yaml:"decider_timeout"`
-	Cell           string                  `yaml:"cell"`
+	Listen           string                  `yaml:"listen"`
+	Resources        []resource.Manifest     `yaml:"resources"`
+	ResourceFiles    []string                `yaml:"resource_files"`
+	Decider          DeciderConfig           `yaml:"decider"`
+	Shadows          []ShadowConfig          `yaml:"shadows"`
+	TracePath        string                  `yaml:"trace_path"`
+	SharedToken      string                  `yaml:"shared_token"`
+	SharedTokenEnv   string                  `yaml:"shared_token_env"`
+	HolderTokens     map[string]string       `yaml:"holder_tokens"`
+	HolderTokensFile string                  `yaml:"holder_tokens_file"`
+	HolderTokensEnv  string                  `yaml:"holder_tokens_env"`
+	DefaultQuota     engine.Quota            `yaml:"default_quota"`
+	HolderQuotas     map[string]engine.Quota `yaml:"holder_quotas"`
+	LeaseTTL         string                  `yaml:"lease_ttl"`
+	TicketTTL        string                  `yaml:"ticket_ttl"`
+	AgingStep        string                  `yaml:"aging_step"`
+	DeciderTimeout   string                  `yaml:"decider_timeout"`
+	Cell             string                  `yaml:"cell"`
 }
 
 // DeciderConfig selects the primary decider.
@@ -117,7 +120,7 @@ func (c Config) Build() (*engine.Engine, error) {
 		AgingStep:      durs.aging,
 		DeciderTimeout: durs.decider,
 		SharedToken:    c.sharedToken(),
-		HolderTokens:   c.HolderTokens,
+		HolderTokens:   c.holderTokens(),
 		DefaultQuota:   c.DefaultQuota,
 		HolderQuotas:   c.HolderQuotas,
 		Cell:           c.Cell,
@@ -177,6 +180,60 @@ func (c Config) sharedToken() string {
 		}
 	}
 	return c.SharedToken
+}
+
+// the plaintext holder_tokens map, then holder_tokens_file, then holder_tokens_env.
+// Tokens are never logged.
+func (c Config) holderTokens() map[string]string {
+	out := make(map[string]string)
+	for k, v := range c.HolderTokens {
+		if v != "" {
+			out[k] = v
+		}
+	}
+	if c.HolderTokensFile != "" {
+		b, err := os.ReadFile(c.HolderTokensFile)
+		if err == nil {
+			var fromFile map[string]string
+			if err := yaml.Unmarshal(b, &fromFile); err == nil {
+				for k, v := range fromFile {
+					if v != "" {
+						out[k] = v
+					}
+				}
+			}
+		}
+	}
+	if c.HolderTokensEnv != "" {
+		if v, ok := os.LookupEnv(c.HolderTokensEnv); ok && v != "" {
+			var fromEnv map[string]string
+			if err := json.Unmarshal([]byte(v), &fromEnv); err == nil {
+				for k, tok := range fromEnv {
+					if tok != "" {
+						out[k] = tok
+					}
+				}
+			} else {
+				for _, part := range strings.Split(v, ",") {
+					part = strings.TrimSpace(part)
+					if part == "" {
+						continue
+					}
+					if i := strings.IndexAny(part, "=:"); i > 0 {
+						key := strings.TrimSpace(part[:i])
+						val := strings.TrimSpace(part[i+1:])
+						if key != "" && val != "" {
+							out[key] = val
+						}
+					}
+				}
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (c Config) buildDecider() (decider.Decider, error) {
