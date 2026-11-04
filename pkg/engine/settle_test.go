@@ -1173,3 +1173,102 @@ func TestStoreSettledFIFO(t *testing.T) {
 		t.Fatalf("stored declared mutated: %d", got)
 	}
 }
+
+// externalEngine registers each manifest with the matching reader (nil means
+// engine-local) so renew sees the same external readings acquire does.
+func externalEngine(t *testing.T, clk *testClock, manifests []resource.Manifest, readers map[string]resource.Reader) *Engine {
+	t.Helper()
+	e, _, _ := newTestEngine(t, clk, nil, nil, func(cfg *Config) {
+		reg := resource.NewRegistry(clk.Now)
+		for _, m := range manifests {
+			if err := reg.Register(m, readers[m.ID]); err != nil {
+				t.Fatalf("register %s: %v", m.ID, err)
+			}
+		}
+		cfg.Registry = reg
+	})
+	return e
+}
+
+func TestRenewDeltaUnknownExternalReadingDenyPolicy(t *testing.T) {
+	clk := baseClock()
+	rdr := resource.NewStaticReader(quelor.Reading{Available: 1000, Capacity: 1000, Known: true, ObservedAt: clk.t})
+	e := externalEngine(t, clk, []resource.Manifest{
+		manifest("gh", resource.ModelLease, 1000, resource.UnknownDeny),
+	}, map[string]resource.Reader{"gh": rdr})
+	lease := acquireLease(t, e, work("u", "h1", map[string]int64{"gh": 1}, ""), "")
+
+	rdr.Set(quelor.Reading{Known: false, ObservedAt: clk.t})
+	if k := acquireVerdict(t, e, work("fresh", "h2", map[string]int64{"gh": 1}, "")); k != quelor.Deny {
+		t.Fatalf("acquire with unknown reading: %s", k)
+	}
+
+	got, err := e.RenewLease(context.Background(), quelor.RenewRequest{
+		LeaseID: lease.ID, HolderID: "h1", Delta: map[string]int64{"gh": 500},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict.Kind == quelor.Admit {
+		t.Fatalf("renew delta admitted on unknown reading: %+v", got.Verdict)
+	}
+	if got.Verdict.Reason != "renew-refused:unknown-reading:gh" || !got.Verdict.Hibernate {
+		t.Fatalf("verdict %+v", got.Verdict)
+	}
+	if got.Lease == nil || got.Lease.Declared["gh"] != 1 || got.Lease.Renewals != 0 || !got.Lease.ExpiresAt.Equal(lease.ExpiresAt) {
+		t.Fatalf("lease changed: %+v", got.Lease)
+	}
+	if e.Stats().RenewRefused != 1 || e.Stats().Renews != 0 {
+		t.Fatalf("stats %+v", e.Stats())
+	}
+
+	// A renew without a positive delta only slides the expiry and does not
+	// consult the external budget.
+	ext, err := e.RenewLease(context.Background(), quelor.RenewRequest{LeaseID: lease.ID, HolderID: "h1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ext.Verdict.Kind != quelor.Admit || ext.Lease.Renewals != 1 || ext.Lease.Declared["gh"] != 1 {
+		t.Fatalf("empty renew %+v %+v", ext.Verdict, ext.Lease)
+	}
+}
+
+func TestRenewDeltaExceedsExternalReading(t *testing.T) {
+	clk := baseClock()
+	rdr := resource.NewStaticReader(quelor.Reading{Available: 3, Capacity: 1000, Known: true, ObservedAt: clk.t})
+	e := externalEngine(t, clk, []resource.Manifest{
+		manifest("gh", resource.ModelLease, 1000, resource.UnknownDeny),
+	}, map[string]resource.Reader{"gh": rdr})
+	lease := acquireLease(t, e, work("u", "h1", map[string]int64{"gh": 1}, ""), "")
+
+	if k := acquireVerdict(t, e, work("big", "h2", map[string]int64{"gh": 500}, "")); k != quelor.Defer {
+		t.Fatalf("acquire above external reading: %s", k)
+	}
+
+	got, err := e.RenewLease(context.Background(), quelor.RenewRequest{
+		LeaseID: lease.ID, HolderID: "h1", Delta: map[string]int64{"gh": 500},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict.Kind != quelor.Defer || !got.Verdict.Hibernate {
+		t.Fatalf("verdict %+v", got.Verdict)
+	}
+	if got.Verdict.Reason != "renew-refused:insufficient:gh" {
+		t.Fatalf("reason %q", got.Verdict.Reason)
+	}
+	if got.Lease == nil || got.Lease.Declared["gh"] != 1 || got.Lease.Renewals != 0 {
+		t.Fatalf("lease changed: %+v", got.Lease)
+	}
+
+	// A delta the external reading covers is still admitted.
+	ok, err := e.RenewLease(context.Background(), quelor.RenewRequest{
+		LeaseID: lease.ID, HolderID: "h1", Delta: map[string]int64{"gh": 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok.Verdict.Kind != quelor.Admit || ok.Lease.Declared["gh"] != 4 {
+		t.Fatalf("covered delta %+v %+v", ok.Verdict, ok.Lease)
+	}
+}

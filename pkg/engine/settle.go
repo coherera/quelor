@@ -58,7 +58,7 @@ func (e *Engine) RenewLease(ctx context.Context, req quelor.RenewRequest) (quelo
 		attribute.String("quelor.tenant_id", env.TenantID),
 	)
 
-	readings := e.settleReadings(ctx, settleUnionKeys(leaseSnap.Declared, req.Delta), start)
+	readings, external := e.settleReadings(ctx, settleUnionKeys(leaseSnap.Declared, req.Delta), start)
 	traceID := ""
 	if sc := span.SpanContext(); sc.HasTraceID() {
 		traceID = sc.TraceID().String()
@@ -119,6 +119,11 @@ func (e *Engine) RenewLease(ctx context.Context, req quelor.RenewRequest) (quelo
 
 	if refuse != "" {
 		out := e.finishRenewRefusal(rec, refuse, stamps, wake, resp, readings, traceID, lat, now)
+		span.SetAttributes(attribute.String("quelor.verdict", string(out.Verdict.Kind)))
+		return out, nil
+	}
+	if reason := e.renewReadingReason(rec.env, req.Delta, readings, external); reason != "" {
+		out := e.finishRenewRefusal(rec, reason, stamps, nil, resp, readings, traceID, lat, now)
 		span.SetAttributes(attribute.String("quelor.verdict", string(out.Verdict.Kind)))
 		return out, nil
 	}
@@ -499,6 +504,31 @@ func (e *Engine) renewUnreachableMustRefuse(env quelor.Envelope, delta map[strin
 	return policyRefuse
 }
 
+// renewReadingReason applies acquire's reading checks to the positive keys of
+// a renew delta. Unknown and stale readings follow the resource's unknown
+// policy (hold_cursor lets the delta continue). An external reading below the
+// requested delta refuses with insufficient:<id>. Keys with no manifest are
+// left to renewReserve.
+func (e *Engine) renewReadingReason(env quelor.Envelope, delta map[string]int64, readings []quelor.Reading, external map[string]bool) string {
+	for _, id := range settlePositiveKeys(delta) {
+		m, ok := e.cfg.Registry.Manifest(id)
+		if !ok {
+			continue
+		}
+		rd := readingFor(readings, id)
+		if rd.Usable() {
+			if external[id] && rd.Available < delta[id] {
+				return "insufficient:" + id
+			}
+			continue
+		}
+		if m.UnknownPolicy.Verdict() != quelor.Admit {
+			return "unknown-reading:" + id
+		}
+	}
+	return ""
+}
+
 func (e *Engine) renewQuotaReason(rec *leaseRec, delta map[string]int64) string {
 	q := e.quotaFor(rec.lease.HolderID)
 	if len(q.MaxUnits) == 0 {
@@ -663,9 +693,12 @@ func (e *Engine) writeSettleTrace(rec *leaseRec, done settleExec, req quelor.Set
 	})
 }
 
-func (e *Engine) settleReadings(ctx context.Context, ids []string, now time.Time) []quelor.Reading {
+// settleReadings reads ids for a renew. external marks resources whose
+// reading came from a registered reader rather than engine state.
+func (e *Engine) settleReadings(ctx context.Context, ids []string, now time.Time) ([]quelor.Reading, map[string]bool) {
+	external := map[string]bool{}
 	if len(ids) == 0 {
-		return nil
+		return nil, external
 	}
 	out := make([]quelor.Reading, 0, len(ids))
 	for _, id := range ids {
@@ -675,6 +708,7 @@ func (e *Engine) settleReadings(ctx context.Context, ids []string, now time.Time
 			if rd.Resource == "" {
 				rd.Resource = id
 			}
+			external[id] = true
 			out = append(out, rd)
 		case errors.Is(err, resource.ErrNoReader):
 			e.mu.Lock()
@@ -695,10 +729,13 @@ func (e *Engine) settleReadings(ctx context.Context, ids []string, now time.Time
 				ObservedAt: now,
 			})
 		default:
+			if !errors.Is(err, resource.ErrNotFound) {
+				external[id] = true
+			}
 			out = append(out, quelor.Reading{Resource: id, Known: false, ObservedAt: now})
 		}
 	}
-	return out
+	return out, external
 }
 
 func (e *Engine) settleNoteEvents(evs []Event) {
