@@ -241,8 +241,10 @@ func (e *Engine) Observe(ctx context.Context, o quelor.Observation) error {
 // releaseLocked returns reserved capacity for rec. The caller holds e.mu.
 // Nil consumed means the reservation was fully used. The lease is dropped from
 // the active indexes. Settled history and traces are the caller's job.
-// Probe closure for reason "settle" is owned by SettleLease; every other reason
-// settles an in-flight circuit probe as success.
+// Probe closure for reason "settle" is owned by SettleLease. Every other reason
+// (including "expire") settles an in-flight circuit probe as failure so the
+// breaker re-opens and the probe slot is freed; only an explicit settle or
+// observation may close the circuit.
 func (e *Engine) releaseLocked(rec *leaseRec, consumed map[string]int64, now time.Time, reason string) quelor.SettleResult {
 	declared := settleCloneI64(rec.lease.Declared)
 	if declared == nil {
@@ -277,7 +279,7 @@ func (e *Engine) releaseLocked(rec *leaseRec, consumed map[string]int64, now tim
 		}
 		s.giveBack(decl, c, win, now)
 		if reason != "settle" && rec.probe != nil && rec.probe[id] {
-			probeEvs = append(probeEvs, s.probeSettled(true, now)...)
+			probeEvs = append(probeEvs, s.probeSettled(false, now)...)
 		}
 	}
 	if len(probeEvs) > 0 {

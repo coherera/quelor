@@ -630,6 +630,83 @@ func TestCircuitProbeSettleCloses(t *testing.T) {
 	}
 }
 
+// Production call sites pass only "settle" (SettleLease) and "expire"
+// (Advance). Any other reason that releases an in-flight probe must fail
+// closed: re-open the breaker and free the probe slot so half-open cannot
+// stick forever if a new release path appears.
+func TestReleaseLockedUnknownReasonReopensProbe(t *testing.T) {
+	clk := baseClock()
+	e, _, _ := newTestEngine(t, clk, []resource.Manifest{
+		manifest("up", resource.ModelCircuit, 2, resource.UnknownHoldCursor),
+	}, nil, nil)
+
+	opened := false
+	for i := 0; i < 20; i++ {
+		if err := e.Observe(context.Background(), quelor.Observation{Resource: "up", HTTPStatus: 503}); err != nil {
+			t.Fatal(err)
+		}
+		if acquireVerdict(t, e, work(fmt.Sprintf("closed-%d", i), "h1", map[string]int64{"up": 1}, "")) != quelor.Admit {
+			opened = true
+			break
+		}
+	}
+	if !opened {
+		t.Fatal("503 observations did not open the circuit")
+	}
+	for i := 0; i < 4; i++ {
+		clk.t = clk.t.Add(time.Hour)
+		_ = e.Advance(clk.t)
+	}
+
+	probe := acquireLease(t, e, work("probe", "h1", map[string]int64{"up": 1}, ""), "")
+	if k := acquireVerdict(t, e, work("second", "h1", map[string]int64{"up": 1}, "")); k == quelor.Admit {
+		t.Fatal("half-open circuit admitted a second demand beside the probe")
+	}
+
+	sub := e.Subscribe()
+	e.mu.Lock()
+	rec := e.leases[probe.ID]
+	if rec == nil || rec.probe == nil || !rec.probe["up"] {
+		e.mu.Unlock()
+		t.Fatal("probe lease missing circuit probe mark")
+	}
+	_ = e.releaseLocked(rec, nil, clk.Now(), "cancel")
+	e.mu.Unlock()
+
+	sawOpen, sawClosed := false, false
+	for _, ev := range drainEvents(sub) {
+		switch ev.Kind {
+		case "circuit-open":
+			sawOpen = true
+		case "circuit-closed":
+			sawClosed = true
+		}
+	}
+	if sawClosed {
+		t.Fatal("unknown release reason closed the circuit")
+	}
+	if !sawOpen {
+		t.Fatal("unknown release reason did not re-open the circuit")
+	}
+
+	var circ circuitMode
+	var inFlight bool
+	e.mu.Lock()
+	s := e.res["up"]
+	circ = s.circ
+	inFlight = s.probeInFlight
+	e.mu.Unlock()
+	if circ != modeOpen {
+		t.Fatalf("circuit mode = %v, want open", circ)
+	}
+	if inFlight {
+		t.Fatal("probe slot still held after unknown-reason release")
+	}
+	if k := acquireVerdict(t, e, work("after-cancel", "h1", map[string]int64{"up": 1}, "")); k == quelor.Admit {
+		t.Fatalf("admitted while re-opened after unknown-reason release: %s", k)
+	}
+}
+
 func TestNotifyCapacityOnSettle(t *testing.T) {
 	clk := baseClock()
 	e, _, _ := newTestEngine(t, clk, []resource.Manifest{

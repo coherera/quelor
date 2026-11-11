@@ -493,6 +493,95 @@ func TestCircuitOpenToHalfOpenProbe(t *testing.T) {
 	}
 }
 
+// An expired probe lease must not close the circuit. The probe never settled,
+// so the breaker re-opens until a later settle or observation proves health.
+func TestCircuitProbeLeaseExpireReopens(t *testing.T) {
+	base := time.Date(2026, 10, 31, 9, 0, 0, 0, time.UTC)
+	leaseTTL := 5 * time.Second
+	openFor := time.Second
+	e, clk, _ := newAdvEngine(t, base, leaseTTL, nil, circuitManifest(openFor))
+	locked(e, func() {
+		e.res["cb"].tripOpen(base)
+	})
+
+	var due time.Time
+	var ok bool
+	locked(e, func() {
+		due, ok = e.res["cb"].nextTimer()
+	})
+	if !ok {
+		t.Fatal("open circuit has no half-open timer")
+	}
+	clk.Set(due)
+	if countKind(e.Advance(due), "half-open") != 1 {
+		t.Fatal("expected half-open")
+	}
+
+	probe := mustAcquire(t, e, envOf("probe-expire", "cb", 1))
+	if probe.Verdict.Kind != quelor.Admit || probe.Lease == nil {
+		t.Fatalf("probe: %+v", probe.Verdict)
+	}
+	if probe.Lease.ExpiresAt.IsZero() {
+		t.Fatal("probe lease missing expiry")
+	}
+
+	expireAt := probe.Lease.ExpiresAt
+	sub := e.Subscribe()
+	clk.Set(expireAt)
+	evs := e.Advance(expireAt)
+	if countKind(evs, "lease-expired") != 1 {
+		t.Fatalf("expected lease-expired, got %+v", evs)
+	}
+
+	// Probe events from releaseLocked are published to subscribers; the
+	// Advance return only carries the lease-expired timer event.
+	sawOpen, sawClosed := false, false
+	for _, ev := range drainEvents(sub) {
+		switch ev.Kind {
+		case "circuit-open":
+			sawOpen = true
+		case "circuit-closed":
+			sawClosed = true
+		}
+	}
+	if sawClosed {
+		t.Fatal("expired probe closed the circuit")
+	}
+	if !sawOpen {
+		t.Fatal("expired probe did not re-open the circuit")
+	}
+
+	var circ circuitMode
+	var inFlight bool
+	locked(e, func() {
+		s := e.res["cb"]
+		circ = s.circ
+		inFlight = s.probeInFlight
+	})
+	if circ != modeOpen {
+		t.Fatalf("circuit mode = %v, want open", circ)
+	}
+	if inFlight {
+		t.Fatal("probe slot still held after expiry")
+	}
+
+	blocked := mustAcquire(t, e, envOf("after-expire", "cb", 1))
+	if blocked.Verdict.Kind == quelor.Admit {
+		t.Fatalf("admitted while re-opened after probe expiry: %+v", blocked.Verdict)
+	}
+
+	// After open_for, a fresh probe slot must be available again.
+	reopenDue := expireAt.Add(openFor)
+	clk.Set(reopenDue)
+	if countKind(e.Advance(reopenDue), "half-open") != 1 {
+		t.Fatal("expected half-open after re-open cooldown")
+	}
+	retry := mustAcquire(t, e, envOf("probe-retry", "cb", 1))
+	if retry.Verdict.Kind != quelor.Admit || retry.Lease == nil {
+		t.Fatalf("retry probe: %+v", retry.Verdict)
+	}
+}
+
 func TestRun(t *testing.T) {
 	t.Run("cancel", func(t *testing.T) {
 		e := newRealEngine(t, time.Hour, slotsManifest(4))
