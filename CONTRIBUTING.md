@@ -39,5 +39,5 @@ triage it (label, accept, decline, or ask for more information) within
 
 ## Pull requests
 
-Open a draft PR early. Fill in the [pull request template](.github/PULL_REQUEST_TEMPLATE.md). A maintainer reviews; CI must pass.
+Open a PR whenever you like, draft or not. A sentence or two on what and why is all the description we need. A maintainer reviews; CI must pass.
 Good first issues are listed in [docs/good-first-issues.md](docs/good-first-issues.md).
