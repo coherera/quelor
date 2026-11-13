@@ -1,6 +1,6 @@
 # Quelor
 
-**Workload admission and flow control for CI and agents. Stop starting work that cannot finish.**
+**Stop CI jobs and AI agents from going red on rate limits and quotas.** Quelor checks the budget before work starts and defers instead of failing, so only real defects page you.
 
 [![License](https://img.shields.io/github/license/coherera/quelor)](LICENSE)
 [![CI](https://github.com/coherera/quelor/actions/workflows/ci.yml/badge.svg)](https://github.com/coherera/quelor/actions/workflows/ci.yml)
@@ -11,7 +11,15 @@
 [![Stars](https://img.shields.io/github/stars/coherera/quelor?style=social)](https://github.com/coherera/quelor/stargazers)
 [![Conformance: candidate](https://img.shields.io/badge/conformance-candidate-lightgrey.svg)](docs/conformance.md)
 
-Quelor is for CI owners and agent authors whose jobs die mid-run on rate limits, budgets or quotas. Read the [manifesto](https://quelor.dev/manifesto/).
+**Who it's for:** platform and CI teams whose workflows hammer the GitHub API or model quotas, and agent authors whose long sessions die mid-run on a 429. Apache-2.0, a single Go binary, and a one-step GitHub Action.
+
+| Without Quelor | With Quelor |
+|---|---|
+| A chatty step starts with 40 API calls left, hits the rate limit, the job goes red and someone gets paged for a "failure" no code change can fix. | A gate reads the live budget first and returns `defer`. The step is skipped with a reason, and the run stays honest. |
+| A long agent session runs out of model credits at hour five and loses its work. | The session holds a short lease and renews it. A refused renewal means checkpoint now and resume later. |
+| Every red build looks like a bug. | A five-class classifier separates exhaustion, outages and flakes from real defects. Only real defects go red. |
+
+**How it fits with what you already use.** Rate limiters (Gubernator, Envoy) price each call. Durable engines (Temporal) keep running work alive through crashes. Kueue queues Kubernetes jobs. Quelor sits in front of all of them and answers one question: should this work start at all, given the budget that is actually left? Read the [manifesto](https://quelor.dev/manifesto/) for the longer argument.
 
 ## Try it in 2 minutes
 
