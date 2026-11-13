@@ -9,11 +9,13 @@ import (
 )
 
 type signatureFixture struct {
-	Name      string `json:"name"`
-	Log       string `json:"log"`
-	ExitCode  *int   `json:"exit_code,omitempty"`
-	WantClass string `json:"want_class"`
-	WantRule  string `json:"want_rule"`
+	Name       string `json:"name"`
+	Log        string `json:"log"`
+	ExitCode   *int   `json:"exit_code,omitempty"`
+	HTTPStatus int    `json:"http_status,omitempty"`
+	TimedOut   bool   `json:"timed_out,omitempty"`
+	WantClass  string `json:"want_class"`
+	WantRule   string `json:"want_rule"`
 }
 
 // TestGHASignatureFixtures pins the generic GitHub Actions error signatures in
@@ -39,7 +41,12 @@ func TestGHASignatureFixtures(t *testing.T) {
 		if f.ExitCode != nil {
 			exit = *f.ExitCode
 		}
-		got := rs.Classify(quelor.ExecutionOutcome{ExitCode: exit, Log: f.Log})
+		got := rs.Classify(quelor.ExecutionOutcome{
+			ExitCode:   exit,
+			HTTPStatus: f.HTTPStatus,
+			Log:        f.Log,
+			TimedOut:   f.TimedOut,
+		})
 		if string(got.Class) != f.WantClass || got.RuleID != f.WantRule {
 			t.Errorf("%s: got %s/%q want %s/%q", f.Name, got.Class, got.RuleID, f.WantClass, f.WantRule)
 		}

@@ -48,6 +48,26 @@
   "want_rule": "gha-wall-clock"
  },
  {
+  "name": "bare timeout flag",
+  "timed_out": true,
+  "want_class": "resource-exhausted",
+  "want_rule": "gha-wall-clock"
+ },
+ {
+  "name": "timeout with connection failure",
+  "log": "request failed: connection refused",
+  "timed_out": true,
+  "want_class": "dependency-unavailable",
+  "want_rule": "gha-dependency"
+ },
+ {
+  "name": "timeout with HTTP 503 status",
+  "http_status": 503,
+  "timed_out": true,
+  "want_class": "dependency-unavailable",
+  "want_rule": "gha-dependency"
+ },
+ {
   "name": "step killed at timeout wrapper",
   "log": "Error: Process completed with exit code 124.",
   "want_class": "resource-exhausted",
