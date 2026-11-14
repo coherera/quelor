@@ -37,13 +37,13 @@ func TestDefaultShape(t *testing.T) {
 		class quelor.OutcomeClass
 		re    string
 	}{
-		{"gha-rate-limit", quelor.ResourceExhausted, `(?i)(API rate limit exceeded|secondary rate limit|rate limit (hit|reached)|abuse detection|HTTP 429|Too Many Requests)`},
+		{"gha-rate-limit", quelor.ResourceExhausted, `(?i)(RATE_LIMITED|API rate limit already exceeded|API rate limit exceeded|secondary rate limit|rate limit (hit|reached)|abuse detection|HTTP 429|Too Many Requests)`},
 		{"gha-dependency", quelor.DependencyUnavailable, `(?i)(503 Service Unavailable|502 Bad Gateway|504 Gateway Time-?out|connection (timed out|refused|reset by peer)|i/o timeout|context deadline exceeded|ETIMEDOUT|ECONNRESET|ECONNREFUSED|TLS handshake timeout|dial tcp .*: (connect|i/o))`},
 		{"gha-flaky", quelor.Flaky, `(?i)(runner has received a shutdown signal|lost communication with the server|hosted runner .* encountered an error|The operation was canceled|No space left on device on runner)`},
 		{"gha-real-defect", quelor.RealDefect, `(?m)(^--- FAIL|^FAIL\s|panic:|AssertionError|Traceback \(most recent call last\)|error\[E\d+\]|SyntaxError|^npm ERR! code ELIFECYCLE|compilation failed|undefined: |cannot find symbol)`},
 	}
-	// The four original rules keep their ids, classes, regexes and relative
-	// order; later rules refine them (ids are stable sub-reasons).
+	// The four original rules keep their ids, classes and relative order;
+	// targeted rule changes update their expected regexes here.
 	byID := map[string]int{}
 	for i, r := range rs.Rules {
 		byID[r.ID] = i

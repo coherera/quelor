@@ -8,7 +8,7 @@ rules:
   - id: gha-rate-limit
     class: resource-exhausted
     http_status: [429]
-    log_regex: '(?i)(API rate limit exceeded|secondary rate limit|rate limit (hit|reached)|abuse detection|HTTP 429|Too Many Requests)'
+    log_regex: '(?i)(RATE_LIMITED|API rate limit already exceeded|API rate limit exceeded|secondary rate limit|rate limit (hit|reached)|abuse detection|HTTP 429|Too Many Requests)'
     note: GitHub API primary or secondary rate limit, including abuse detection.
   - id: gha-dependency
     class: dependency-unavailable
