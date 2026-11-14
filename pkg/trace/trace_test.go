@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -216,7 +217,8 @@ func TestOpenFileAppendMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := fi.Mode().Perm(); got != 0o600 {
+	// Windows has no Unix permission bits: Go reports 0666 for any writable file.
+	if got := fi.Mode().Perm(); runtime.GOOS != "windows" && got != 0o600 {
 		t.Fatalf("permissions = %#o", got)
 	}
 

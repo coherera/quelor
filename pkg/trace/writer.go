@@ -36,6 +36,8 @@ func NewJSONLWriter(w io.Writer) *JSONLWriter {
 
 // OpenFile opens path in append mode with permissions 0600, creating it if
 // needed, and returns a JSONLWriter that closes the file on Close.
+// The 0600 mode applies on Unix. Windows has no Unix permission bits, so
+// there the file inherits the access control list of its directory.
 func OpenFile(path string) (*JSONLWriter, error) {
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
