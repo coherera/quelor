@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -179,6 +180,9 @@ func TestHTTPClientTransportCases(t *testing.T) {
 						<-r.Context().Done()
 						return nil, r.Context().Err()
 					default:
+						if tc.fillLat {
+							waitClockTick()
+						}
 						return &http.Response{
 							StatusCode: tc.status,
 							Header:     make(http.Header),
@@ -274,10 +278,20 @@ func serve(t *testing.T, h http.Handler) (*httptest.Server, *headerSnap) {
 	snap := &headerSnap{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		snap.record(r)
+		waitClockTick()
 		h.ServeHTTP(w, r)
 	}))
 	t.Cleanup(srv.Close)
 	return srv, snap
+}
+
+// waitClockTick returns once time.Now has advanced. On Windows the clock
+// moves in steps of up to about 16 ms, so a fast call can otherwise measure
+// an elapsed time of exactly zero.
+func waitClockTick() {
+	for start := time.Now(); !time.Now().After(start); {
+		runtime.Gosched()
+	}
 }
 
 func TestHTTPRoundTrip(t *testing.T) {
