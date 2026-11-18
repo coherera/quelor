@@ -284,5 +284,41 @@
   "log": "Service Unavailable: The job was not started because an Actions budget is preventing further use.",
   "want_class": "resource-exhausted",
   "want_rule": "gha-budget-wall"
+ },
+ {
+  "name": "Docker Hub pull limit",
+  "log": "toomanyrequests: You have reached your pull rate limit.",
+  "want_class": "resource-exhausted",
+  "want_rule": "gha-docker-pull-limit"
+ },
+ {
+  "name": "Docker daemon pull limit",
+  "log": "Error response from daemon: toomanyrequests: You have reached your pull rate limit. You may increase the limit by authenticating and upgrading.",
+  "want_class": "resource-exhausted",
+  "want_rule": "gha-docker-pull-limit"
+ },
+ {
+  "name": "pull limit configuration is not exhaustion",
+  "log": "Configured pull rate limit for registry mirror",
+  "want_class": "unknown",
+  "want_rule": ""
+ },
+ {
+  "name": "toomanyrequests identifier is not a refusal",
+  "log": "checking toomanyrequests handling",
+  "want_class": "unknown",
+  "want_rule": ""
+ },
+ {
+  "name": "Docker pull authentication failure",
+  "log": "Error response from daemon: Authentication failed",
+  "want_class": "real-defect",
+  "want_rule": "gha-credential"
+ },
+ {
+  "name": "quoted Docker pull error is not exhaustion",
+  "log": "AssertionError: expected \"toomanyrequests: You have reached your pull rate limit.\"",
+  "want_class": "real-defect",
+  "want_rule": "gha-real-defect"
  }
 ]

@@ -27,6 +27,10 @@ rules:
     class: resource-exhausted
     log_regex: '(?i)(job was not started because .{0,80}(budget|spending limit|payments have failed)|spending limit needs to be increased|budget is preventing)'
     note: The job was refused before step 1 by an account spend cap. Back off for hours or days, not seconds; retrying cannot help until the cap lifts. Unreachable for an exit-0 refusal until v0.2 because Classify treats exit 0 with no error status as success before any rule runs (see the TODO in classify.go).
+  - id: gha-docker-pull-limit
+    class: resource-exhausted
+    log_regex: '(?im)^(Error response from daemon: )?toomanyrequests:[ \t]+You have reached your pull rate limit\b'
+    note: Docker Hub refused a pull because its pull-rate budget is exhausted. Authenticate or wait for the pull window to recover.
   - id: gha-quota
     class: resource-exhausted
     log_regex: '(?i)(artifact storage quota|storage quota (has been )?(hit|exceeded)|quota (has been )?exceeded|No space left on device)'
