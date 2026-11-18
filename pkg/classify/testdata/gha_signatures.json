@@ -178,6 +178,67 @@
   "want_rule": "gha-cancelled"
  },
  {
+  "name": "Maven Central 429",
+  "log": "            (https://repo.maven.apache.org/maven2): status code: 429, reason phrase: Too Many Requests (429)",
+  "want_class": "resource-exhausted",
+  "want_rule": "gha-rate-limit"
+ },
+ {
+  "name": "Gradle registry 429",
+  "log": "                  > Received status code 429 from server: Too Many Requests",
+  "want_class": "resource-exhausted",
+  "want_rule": "gha-rate-limit"
+ },
+ {
+  "name": "npm registry E429",
+  "log": "npm error code E429",
+  "want_class": "resource-exhausted",
+  "want_rule": "gha-rate-limit-text"
+ },
+ {
+  "name": "bare registry 403 is not throttling",
+  "log": "Received status code 403 from server: Forbidden",
+  "http_status": 403,
+  "want_class": "unknown",
+  "want_rule": ""
+ },
+ {
+  "name": "npm registry E403 is not throttling",
+  "log": "npm error code E403",
+  "want_class": "unknown",
+  "want_rule": ""
+ },
+ {
+  "name": "npm registry authentication failure",
+  "log": "npm error code E403\nAuthentication failed",
+  "want_class": "real-defect",
+  "want_rule": "gha-credential"
+ },
+ {
+  "name": "E429 identifier is not npm throttling",
+  "log": "checking E429 handling",
+  "want_class": "unknown",
+  "want_rule": ""
+ },
+ {
+  "name": "quoted npm error is not throttling",
+  "log": "AssertionError: expected \"npm error code E429\"",
+  "want_class": "real-defect",
+  "want_rule": "gha-real-defect"
+ },
+ {
+  "name": "npm E429 prefix is not throttling",
+  "log": "npm error code E4290",
+  "want_class": "unknown",
+  "want_rule": ""
+ },
+ {
+  "name": "npm legacy registry E429",
+  "log": "npm ERR! code E429",
+  "want_class": "resource-exhausted",
+  "want_rule": "gha-rate-limit-text"
+ },
+ {
   "name": "npm audit gate",
   "log": "# npm audit report\nfoo  <1.2.3\nSeverity: high\nfoo - GHSA-abcd-efgh-ijkl\n2 high severity vulnerabilities",
   "want_class": "real-defect",

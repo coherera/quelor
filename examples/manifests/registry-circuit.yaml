@@ -1,0 +1,15 @@
+# Load with resource_files: [examples/manifests/registry-circuit.yaml] in
+# quelord's config when starting it from the repository root.
+# This breaker tracks observed failures, not Maven Central's remaining budget.
+# Acquire a lease demanding maven_central: 1 before registry-dependent work;
+# renew while it runs and settle afterwards. Only participating clients are gated.
+# Report actual registry HTTP statuses with resource-scoped observations on
+# settle (or /v1/observe). Classifying an E429 log alone does not open the circuit.
+# Three consecutive HTTP 429 or 5xx observations open it; other positive statuses
+# reset the failure count. After one minute one probe is admitted. Report its
+# actual status too: a failed probe reopens the circuit, a successful one closes it.
+# open_for is a local cooldown, not a server reset time; circuits ignore Retry-After.
+id: maven_central
+capacity_model: circuit
+failure_threshold: 3
+open_for: 1m
