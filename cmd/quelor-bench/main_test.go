@@ -12,7 +12,7 @@ import (
 func TestRunJSONOutput(t *testing.T) {
 	want := bench.Report{
 		Throughput: 12.5,
-		Scenarios: []bench.ScenarioResult{{Name: "sample", Units: 1}},
+		Scenarios:  []bench.ScenarioResult{{Name: "sample", Units: 1}},
 	}
 	var gotOptions bench.Options
 	var out bytes.Buffer

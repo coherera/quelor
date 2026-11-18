@@ -35,8 +35,8 @@ type Mode = decision.Mode
 
 const (
 	ModeLogOnly = decision.ModeLogOnly // verdict recorded, never applied
-	ModeAdvise  = decision.ModeAdvise   // verdict recorded as advisory, never applied
-	ModeEnforce = decision.ModeEnforce  // verdict applied
+	ModeAdvise  = decision.ModeAdvise  // verdict recorded as advisory, never applied
+	ModeEnforce = decision.ModeEnforce // verdict applied
 )
 
 // CallMeta carries observability context.
