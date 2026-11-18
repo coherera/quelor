@@ -1,0 +1,15 @@
+# Load with resource_files: [examples/manifests/runner-slots.yaml] in quelord's
+# config when starting it from the repository root.
+# Illustrative capacities only: set these from your own plan and runner pool.
+# Only participating work that acquires a lease is counted; GitHub's live
+# concurrency and jobs outside this quelord instance are not measured.
+resources:
+  - id: gha_hosted_jobs
+    capacity_model: lease
+    capacity: 20
+  - id: gha_macos_jobs
+    capacity_model: lease
+    capacity: 5
+  - id: gpu_runner_slots
+    capacity_model: lease
+    capacity: 2

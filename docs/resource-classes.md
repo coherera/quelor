@@ -87,6 +87,27 @@ freshness; a probe error yields an unknown reading and `available` is forced to 
 `quelor admit` against GitHub's rate limits (`github_api`, `github_search`,
 `github_graphql`, `github_code_search`), which reads `/rate_limit` per call.
 
+## Runner slots
+
+[runner-slots.yaml](../examples/manifests/runner-slots.yaml) declares hosted,
+macOS and GPU concurrent slots with the existing `lease` model. Its capacities
+are examples, not discovered limits: set them from your own GitHub plan and
+runner pool. Load it through `resource_files` in the `quelord` config.
+
+Use the daemon's lease HTTP API (or embed the engine) to acquire one unit before
+starting participating work, renew before expiry while it runs, and settle when
+it stops. Stop work if renewal is refused; an expired lease releases its slots
+even if the work continues. A hosted macOS job should demand both
+`gha_hosted_jobs: 1` and `gha_macos_jobs: 1` in the same acquire so both limits
+apply. Demand `gpu_runner_slots: 1` for work using that pool.
+
+Quelor cannot read GitHub's live concurrency. It counts only jobs that take and
+maintain a lease from the same `quelord` instance; other jobs are invisible.
+A step inside a GitHub Actions job runs after its runner is assigned, so gating
+that step controls cooperative work, not GitHub's scheduling queue. Controlling
+submission itself requires a caller that acquires before dispatching the job.
+The daemon-free `quelor admit` CLI and Action do not acquire these slot leases.
+
 ## Extending
 
 Resource classes model machine resources only. To add a resource, write a manifest. To
