@@ -23,6 +23,10 @@ rules:
     class: resource-exhausted
     log_regex: '(?i)(rate limit exceeded|HTTP[ =:/]*429\b|status[ =:(]+429\b|Retry-After: \d+)'
     note: Rate-limit wording the first rule does not cover (installation limit, bare 429 in a client log).
+  - id: gha-docker-hub-pull-limit
+    class: resource-exhausted
+    log_regex: '(?i)(toomanyrequests.*pull rate limit|pull rate limit.*toomanyrequests)'
+    note: Docker Hub pull rate limit reached.
   - id: gha-budget-wall
     class: resource-exhausted
     log_regex: '(?i)(job was not started because .{0,80}(budget|spending limit|payments have failed)|spending limit needs to be increased|budget is preventing)'

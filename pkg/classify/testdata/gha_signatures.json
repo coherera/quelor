@@ -302,5 +302,11 @@
   "log": "Service Unavailable: The job was not started because an Actions budget is preventing further use.",
   "want_class": "resource-exhausted",
   "want_rule": "gha-budget-wall"
- }
+ },
+  {
+    "name": "docker hub pull rate limit",
+    "log": "toomanyrequests: You have reached your pull rate limit",
+    "want_class": "resource-exhausted",
+    "want_rule": "gha-docker-hub-pull-limit"
+  }
 ]
