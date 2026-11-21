@@ -1,0 +1,5 @@
+# Start from the repository root with:
+# go run ./cmd/quelord -config examples/quelord-model-credits.yaml
+listen: 127.0.0.1:8080
+resource_files:
+  - examples/manifests/model-credits.yaml

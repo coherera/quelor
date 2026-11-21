@@ -15,6 +15,86 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: go build ./...
+      - name: Smoke-test model credit daemon
+        shell: bash
+        run: |
+          set -euo pipefail
+          go run ./cmd/quelord -config examples/quelord-model-credits.yaml >"$RUNNER_TEMP/quelord.log" 2>&1 &
+          server_pid=$!
+          cleanup() {
+            kill "$server_pid" 2>/dev/null || true
+            wait "$server_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          ready=false
+          for _ in {1..30}; do
+            if (echo > /dev/tcp/127.0.0.1/8080) >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              cat "$RUNNER_TEMP/quelord.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then
+            cat "$RUNNER_TEMP/quelord.log"
+            echo "quelord did not become ready"
+            exit 1
+          fi
+
+          acquire=$(curl --fail-with-body --silent --show-error \
+            -X POST http://127.0.0.1:8080/v1/lease/acquire \
+            -H 'Content-Type: application/json' \
+            -d '{"envelope":{"unit_id":"model-review-ci","tenant_id":"ci","holder_id":"ci-smoke","priority":"change","demands":{"model_credits_monthly":1000,"model_spend_lifetime":1000}}}')
+          echo "ACQUIRE_RESPONSE:"
+          jq . <<<"$acquire"
+          jq -e '.verdict.kind == "ADMIT" and (.lease.id | type == "string" and length > 0)' <<<"$acquire" >/dev/null
+          lease_id=$(jq -r '.lease.id' <<<"$acquire")
+
+          renew_body=$(jq -n --arg id "$lease_id" '{lease_id:$id,holder_id:"ci-smoke",delta:{model_credits_monthly:500,model_spend_lifetime:500}}')
+          renew=$(curl --fail-with-body --silent --show-error \
+            -X POST http://127.0.0.1:8080/v1/lease/renew \
+            -H 'Content-Type: application/json' -d "$renew_body")
+          echo "RENEW_RESPONSE:"
+          jq . <<<"$renew"
+          jq -e '.verdict.kind == "ADMIT"' <<<"$renew" >/dev/null
+
+          # A reservation beyond the remaining allowance must be refused
+          # without extending the active lease.
+          refused_renew_body=$(jq -n --arg id "$lease_id" '{lease_id:$id,holder_id:"ci-smoke",delta:{model_credits_monthly:50000,model_spend_lifetime:50000}}')
+          refused_renew=$(curl --fail-with-body --silent --show-error \
+            -X POST http://127.0.0.1:8080/v1/lease/renew \
+            -H 'Content-Type: application/json' -d "$refused_renew_body")
+          echo "REFUSED_RENEW_RESPONSE:"
+          jq . <<<"$refused_renew"
+          expected_expiry=$(jq -r '.lease.expires_at' <<<"$renew")
+          jq -e --arg expiry "$expected_expiry" '.verdict.kind == "DEFER" and .lease.expires_at == $expiry' <<<"$refused_renew" >/dev/null
+
+          # A different holder must not be able to settle this lease.
+          wrong_holder_body=$(jq -n --arg id "$lease_id" '{lease_id:$id,holder_id:"wrong-holder",consumed:{model_credits_monthly:0,model_spend_lifetime:0}}')
+          wrong_holder_status=$(curl --silent --show-error --output "$RUNNER_TEMP/wrong-holder.json" --write-out '%{http_code}' \
+            -X POST http://127.0.0.1:8080/v1/lease/settle \
+            -H 'Content-Type: application/json' -d "$wrong_holder_body")
+          test "$wrong_holder_status" = "403"
+          jq -e '.error | contains("holder does not own this lease")' "$RUNNER_TEMP/wrong-holder.json" >/dev/null
+
+          settle_body=$(jq -n --arg id "$lease_id" '{lease_id:$id,holder_id:"ci-smoke",consumed:{model_credits_monthly:800,model_spend_lifetime:800}}')
+          settle=$(curl --fail-with-body --silent --show-error \
+            -X POST http://127.0.0.1:8080/v1/lease/settle \
+            -H 'Content-Type: application/json' -d "$settle_body")
+          echo "SETTLE_RESPONSE:"
+          jq . <<<"$settle"
+          jq -e '.declared.model_credits_monthly == 1500 and .consumed.model_credits_monthly == 800 and .delta.model_credits_monthly == 700' <<<"$settle" >/dev/null
+
+          duplicate=$(curl --fail-with-body --silent --show-error \
+            -X POST http://127.0.0.1:8080/v1/lease/settle \
+            -H 'Content-Type: application/json' -d "$settle_body")
+          echo "DUPLICATE_SETTLE_RESPONSE:"
+          jq . <<<"$duplicate"
+          jq -e '.duplicate == true' <<<"$duplicate" >/dev/null
       - run: go vet ./...
       - run: go test -race ./...
       - run: go test -run xxx -bench . -benchtime 100x ./bench/
