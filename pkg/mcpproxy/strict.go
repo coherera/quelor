@@ -124,20 +124,3 @@ func (o *object) echoID() json.RawMessage {
 	}
 	return nil
 }
-
-// mentionsToolsCall reports whether any key that folds to "method" carries a
-// string that folds to "tools/call". It is deliberately loose: it only decides
-// whether a batch element must be refused.
-func mentionsToolsCall(raw []byte) bool {
-	o, err := scanObject(raw)
-	if err != nil {
-		return false
-	}
-	for k, v := range o.fields {
-		var s string
-		if strings.EqualFold(k, "method") && json.Unmarshal(v, &s) == nil && strings.EqualFold(s, "tools/call") {
-			return true
-		}
-	}
-	return false
-}

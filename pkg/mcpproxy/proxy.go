@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/coherera/quelor/pkg/classify"
 	"github.com/coherera/quelor/pkg/engine"
@@ -367,27 +368,31 @@ func (p *Proxy) handleClientLine(ctx context.Context, line []byte, clientOut, se
 		return err
 	}
 
-	if !json.Valid(trimmed) {
-		// A line that is not exactly one JSON value is never forwarded. A
-		// streaming JSON reader in the server could decode a second object
-		// from it, including a tools/call the proxy never saw.
+	if !json.Valid(trimmed) || !utf8.Valid(trimmed) || hasInnerCR(line) {
+		// A line that is not exactly one well-formed JSON value is never
+		// forwarded. A streaming JSON reader in the server could decode a
+		// second object from it; a reader that splits on a bare CR could see
+		// two lines where the proxy saw one; a reader that drops invalid UTF-8
+		// could read a key the proxy did not.
 		p.logf("[quelor] REFUSE reason=parse-error\n")
 		return p.writeRPCError(clientOut, nil, rpcParseError, "quelor: line is not exactly one JSON value")
 	}
 
 	if trimmed[0] == '[' {
-		if batchHasToolsCall(trimmed) {
-			p.logf("[quelor] REFUSE reason=batch-with-tools-call\n")
-			return p.writeRPCError(clientOut, nil, rpcInvalidRequest, "quelor: JSON-RPC batches containing tools/call are not supported; send each call as its own message")
-		}
-		_, err := serverIn.Write(line)
-		return err
+		// MCP removed JSON-RPC batching (spec 2025-06-18). Reading inside a
+		// batch the way every server would is not possible, so none is
+		// forwarded.
+		p.logf("[quelor] REFUSE reason=batch\n")
+		return p.writeRPCError(clientOut, nil, rpcInvalidRequest, "quelor: JSON-RPC batches are not supported; send each message on its own line")
 	}
 
 	obj, err := scanObject(trimmed)
 	if err != nil {
-		// Text that is not a JSON object cannot be a tools/call and is
-		// forwarded unchanged.
+		if trimmed[0] == '{' {
+			p.logf("[quelor] REFUSE reason=unreadable-object\n")
+			return p.writeRPCError(clientOut, nil, rpcInvalidRequest, "quelor: request object could not be read")
+		}
+		// A JSON scalar cannot be a tools/call and is forwarded unchanged.
 		_, werr := serverIn.Write(line)
 		return werr
 	}
@@ -405,9 +410,26 @@ func (p *Proxy) handleClientLine(ctx context.Context, line []byte, clientOut, se
 	}
 
 	method, _ := obj.str("method")
+	if !methodCharsOK(method) {
+		p.logf("[quelor] REFUSE reason=method-chars\n")
+		return p.writeRPCError(clientOut, obj.echoID(), rpcInvalidRequest, "quelor: method may hold only letters, digits and _ / . $ -")
+	}
 	if method != "tools/call" && strings.EqualFold(method, "tools/call") {
 		p.logf("[quelor] REFUSE reason=non-canonical-method\n")
 		return p.writeRPCError(clientOut, obj.echoID(), rpcInvalidRequest, "quelor: method must be spelled exactly tools/call")
+	}
+	if method != "" && method != "tools/call" {
+		if key, display, _, ok := canonicalID(obj.fields["id"]); ok {
+			p.mu.Lock()
+			_, inflight := p.inflight[key]
+			p.mu.Unlock()
+			if inflight {
+				// The child's reply to this request would settle the
+				// in-flight call's lease while that call still runs.
+				p.logf("[quelor] REFUSE id=%s reason=duplicate-id\n", display)
+				return p.writeRPCError(clientOut, obj.echoID(), rpcInvalidRequest, "quelor: duplicate request id in flight")
+			}
+		}
 	}
 	switch method {
 	case "notifications/cancelled":
@@ -564,18 +586,27 @@ func (p *Proxy) release(leaseID string) {
 	})
 }
 
-// batchHasToolsCall reports whether a JSON-array batch carries a tools/call.
-func batchHasToolsCall(raw []byte) bool {
-	var batch []json.RawMessage
-	if json.Unmarshal(raw, &batch) != nil {
-		return false
-	}
-	for _, el := range batch {
-		if mentionsToolsCall(el) {
-			return true
+// hasInnerCR reports whether line holds a carriage return other than one
+// directly before its final newline. Raw CR is legal JSON whitespace, but a
+// server that reads lines with universal newlines splits on it.
+func hasInnerCR(line []byte) bool {
+	body := bytes.TrimSuffix(line, []byte("\n"))
+	body = bytes.TrimSuffix(body, []byte("\r"))
+	return bytes.IndexByte(body, '\r') >= 0
+}
+
+// methodCharsOK reports whether a method holds only the characters JSON-RPC
+// and MCP method names use, so padding, NUL or look-alike letters cannot make
+// two parsers disagree on whether a method is tools/call.
+func methodCharsOK(m string) bool {
+	for i := 0; i < len(m); i++ {
+		c := m[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+			c == '_' || c == '/' || c == '.' || c == '$' || c == '-') {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func (p *Proxy) pumpServerToClient(ctx context.Context, serverOut io.Reader, clientOut io.Writer) error {

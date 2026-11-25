@@ -115,7 +115,7 @@ func TestUngatedToolsCallsAreRefusedNotForwarded(t *testing.T) {
 		{
 			name:     "batch with a tools/call",
 			line:     `[{"jsonrpc":"2.0","id":1,"method":"tools/list"},{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"t"}}]` + "\n",
-			wantCode: rpcInvalidRequest, wantID: "null", wantLog: "reason=batch-with-tools-call",
+			wantCode: rpcInvalidRequest, wantID: "null", wantLog: "reason=batch",
 		},
 		{
 			name:    "tools/call without an id",
@@ -182,11 +182,18 @@ func TestUngatedToolsCallsAreRefusedNotForwarded(t *testing.T) {
 	}
 }
 
-func TestBatchWithoutToolsCallStillForwarded(t *testing.T) {
-	line := `[{"jsonrpc":"2.0","id":1,"method":"tools/list"},{"jsonrpc":"2.0","method":"notifications/initialized"}]` + "\n"
-	client, child, _, _ := ungatedCase(t, Config{}, line, nil)
-	if client != "" || child != line {
-		t.Fatalf("batch without tools/call must pass through: client=%q child=%q", client, child)
+// Every batch is refused: a duplicate method or a nested array inside one
+// could be read as a tools/call by some server.
+func TestEveryBatchIsRefused(t *testing.T) {
+	for _, line := range []string{
+		`[{"jsonrpc":"2.0","id":1,"method":"tools/list"},{"jsonrpc":"2.0","method":"notifications/initialized"}]`,
+		`[{"jsonrpc":"2.0","id":1,"method":"tools/call","method":"ping","params":{"name":"t"}}]`,
+		`[[{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"t"}}]]`,
+	} {
+		client, child, _, _ := ungatedCase(t, Config{}, line+"\n", nil)
+		if child != "" || !strings.Contains(client, "-32600") {
+			t.Fatalf("batch %q: client=%q child=%q, want refused and not forwarded", line, client, child)
+		}
 	}
 }
 
