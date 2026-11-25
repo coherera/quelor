@@ -140,7 +140,7 @@ func TestUngatedToolsCallsAreRefusedNotForwarded(t *testing.T) {
 		{
 			name:     "envelope that does not fit the message struct",
 			line:     `{"jsonrpc":2,"id":9,"method":"tools/call","params":{"name":"t"}}` + "\n",
-			wantCode: rpcInvalidRequest, wantID: "null", wantLog: "reason=unparseable-tools-call",
+			wantCode: rpcInvalidRequest, wantID: "9", wantLog: "reason=unparseable-tools-call",
 		},
 		{
 			name:     "arguments that cannot be canonicalized",

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -374,46 +375,70 @@ func (p *Proxy) handleClientLine(ctx context.Context, line []byte, clientOut, se
 		return err
 	}
 
-	var msg rpcMessage
-	if err := json.Unmarshal(trimmed, &msg); err != nil {
-		// Valid JSON that does not fit the envelope (for example a numeric
-		// "jsonrpc") must not slip a tools/call past the gate. Text that is not
-		// JSON at all cannot be a tools/call and is forwarded unchanged.
-		if isToolsCall(trimmed) {
-			p.logf("[quelor] REFUSE reason=unparseable-tools-call\n")
-			return p.writeRPCError(clientOut, nil, rpcInvalidRequest, "quelor: tools/call is not a valid JSON-RPC request")
-		}
+	obj, err := scanObject(trimmed)
+	if err != nil {
+		// Text that is not a JSON object cannot be a tools/call and is
+		// forwarded unchanged.
 		_, werr := serverIn.Write(line)
 		return werr
 	}
-
-	switch msg.Method {
-	case "notifications/cancelled":
-		p.cancelInflight(msg.Params)
-	case "tools/call":
-		return p.gateToolsCall(ctx, line, msg, clientOut, serverIn)
+	if obj.hasCollision() {
+		// Two keys that differ only in case (or repeat) are read differently
+		// by different JSON parsers, so the proxy cannot know which method the
+		// server will run. Refuse rather than guess.
+		p.logf("[quelor] REFUSE reason=key-collision\n")
+		return p.writeRPCError(clientOut, obj.echoID(), rpcInvalidRequest, "quelor: request has duplicate or case-colliding keys")
 	}
-	_, err := serverIn.Write(line)
-	return err
+
+	method, _ := obj.str("method")
+	switch method {
+	case "notifications/cancelled":
+		p.cancelInflight(obj.fields["params"])
+	case "tools/call":
+		return p.gateToolsCall(ctx, line, obj, clientOut, serverIn)
+	}
+	_, werr := serverIn.Write(line)
+	return werr
 }
 
-func (p *Proxy) gateToolsCall(ctx context.Context, line []byte, msg rpcMessage, clientOut, serverIn io.Writer) error {
+func (p *Proxy) gateToolsCall(ctx context.Context, line []byte, obj *object, clientOut, serverIn io.Writer) error {
+	if v, ok := obj.str("jsonrpc"); !ok || v != "2.0" {
+		p.logf("[quelor] REFUSE reason=unparseable-tools-call\n")
+		return p.writeRPCError(clientOut, obj.echoID(), rpcInvalidRequest, "quelor: tools/call is not a valid JSON-RPC request")
+	}
+	// The params object gets the same strict reading as the envelope, so a
+	// shadowed "name" cannot gate one tool while the server runs another.
+	pobj, perr := scanObject(obj.fields["params"])
 	var params toolCallParams
-	var paramsErr error
-	if len(msg.Params) > 0 {
-		paramsErr = json.Unmarshal(msg.Params, &params)
+	if perr == nil {
+		params.Name, _ = pobj.str("name")
+		params.Arguments = pobj.fields["arguments"]
 	}
 
-	idKey, idDisplay, rawID, hasID := canonicalID(msg.ID)
+	idKey, idDisplay, rawID, hasID := canonicalID(obj.fields["id"])
 	if !hasID {
 		// A call without an id is a notification: it gets no reply, so it cannot
 		// be answered with a refusal. Dropping it is the only gated outcome.
 		p.logf("[quelor] REFUSE tool=%q reason=no-id\n", params.Name)
 		return nil
 	}
-	if paramsErr != nil {
+	if perr != nil || params.Name == "" {
 		p.logf("[quelor] REFUSE id=%s reason=bad-params\n", idDisplay)
-		return p.writeRPCError(clientOut, rawID, rpcInvalidParams, "quelor: tools/call params are not valid")
+		return p.writeRPCError(clientOut, rawID, rpcInvalidParams, "quelor: tools/call params need an object with a non-empty string name")
+	}
+	if pobj.hasCollision() {
+		p.logf("[quelor] REFUSE id=%s reason=key-collision\n", idDisplay)
+		return p.writeRPCError(clientOut, rawID, rpcInvalidRequest, "quelor: tools/call params have duplicate or case-colliding keys")
+	}
+
+	p.mu.Lock()
+	_, inflight := p.inflight[idKey]
+	p.mu.Unlock()
+	if inflight {
+		// Replacing the entry would drop the older call's lease while that call
+		// still runs, so the concurrency cap would no longer hold.
+		p.logf("[quelor] REFUSE id=%s tool=%q reason=duplicate-id\n", idDisplay, params.Name)
+		return p.writeRPCError(clientOut, rawID, rpcInvalidRequest, "quelor: duplicate request id in flight")
 	}
 
 	env := quelor.Envelope{
@@ -459,14 +484,8 @@ func (p *Proxy) gateToolsCall(ctx context.Context, line []byte, msg rpcMessage, 
 		p.release(res.Lease.ID)
 		return errors.New("mcpproxy: session ended")
 	}
-	prev, dup := p.inflight[idKey]
 	p.inflight[idKey] = res.Lease.ID
 	p.mu.Unlock()
-	if dup {
-		// The client reused an id that is still in flight; the older call can
-		// no longer be matched to a reply, so give its capacity back.
-		p.release(prev)
-	}
 
 	if _, err := serverIn.Write(line); err != nil {
 		p.mu.Lock()
@@ -483,13 +502,11 @@ func (p *Proxy) gateToolsCall(ctx context.Context, line []byte, msg rpcMessage, 
 // cancelInflight settles the call a client notifications/cancelled names. The
 // notification itself is still forwarded to the child.
 func (p *Proxy) cancelInflight(params json.RawMessage) {
-	var c struct {
-		RequestID json.RawMessage `json:"requestId"`
-	}
-	if json.Unmarshal(params, &c) != nil {
+	o, err := scanObject(params)
+	if err != nil || o.hasCollision() {
 		return
 	}
-	idKey, _, _, ok := canonicalID(c.RequestID)
+	idKey, _, _, ok := canonicalID(o.fields["requestId"])
 	if !ok {
 		return
 	}
@@ -525,14 +542,6 @@ func (p *Proxy) release(leaseID string) {
 	})
 }
 
-// isToolsCall reports whether raw is a JSON object whose method is tools/call.
-func isToolsCall(raw []byte) bool {
-	var probe struct {
-		Method string `json:"method"`
-	}
-	return json.Unmarshal(raw, &probe) == nil && probe.Method == "tools/call"
-}
-
 // batchHasToolsCall reports whether a JSON-array batch carries a tools/call.
 func batchHasToolsCall(raw []byte) bool {
 	var batch []json.RawMessage
@@ -540,7 +549,7 @@ func batchHasToolsCall(raw []byte) bool {
 		return false
 	}
 	for _, el := range batch {
-		if isToolsCall(el) {
+		if mentionsToolsCall(el) {
 			return true
 		}
 	}
@@ -753,7 +762,22 @@ func canonicalID(raw json.RawMessage) (key, display string, trimmed json.RawMess
 		return "s:" + s, displayID(s), json.RawMessage(b), true
 	}
 	s := string(b)
-	return "n:" + s, displayID(s), json.RawMessage(b), true
+	return "n:" + canonicalNumber(s), displayID(s), json.RawMessage(b), true
+}
+
+// canonicalNumber maps the spellings of one whole number (1, 1.0, 1e0) to a
+// single form, because a server may re-serialise an id and still mean the same
+// request. Integer literals and anything beyond exact float range stay as sent,
+// so distinct large ids never merge.
+func canonicalNumber(s string) string {
+	if !strings.ContainsAny(s, ".eE") {
+		return s
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil || f != math.Trunc(f) || math.Abs(f) > 1<<53 {
+		return s
+	}
+	return strconv.FormatInt(int64(f), 10)
 }
 
 // displayID renders an id for a stderr line. An id with a space or a
