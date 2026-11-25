@@ -7,11 +7,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/coherera/quelor/pkg/admit"
 	"github.com/coherera/quelor/pkg/classify"
 	"github.com/coherera/quelor/pkg/decider/reference"
+	"github.com/coherera/quelor/pkg/mcpproxy"
 	"github.com/coherera/quelor/pkg/quelor"
 	"github.com/coherera/quelor/pkg/replay"
 	"github.com/coherera/quelor/pkg/trace"
@@ -27,6 +31,7 @@ const usageText = `usage: quelor <command> [flags]
 commands:
   admit --resource <github_api|github_search|github_graphql|github_code_search> --need <n> [--optional] [--json] [--api-url <url>]
   classify [--exit-code <n>] [--http-status <n>] [--timed-out] [--log-file <path>|-] [--rules <path>]
+  mcp [--rate <n>/<dur>] [--max-concurrent <n>] [--call-timeout <dur>] [--coalesce] [--trace <file.jsonl>] -- <server-cmd> [args...]
   replay --trace <file.jsonl> --decider <file.yaml> [--json]
   version
 `
@@ -44,6 +49,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		return runAdmit(args[1:], stdout, stderr, getenv)
 	case "classify":
 		return runClassify(args[1:], stdin, stdout, stderr)
+	case "mcp":
+		return runMCP(args[1:], stdin, stdout, stderr)
 	case "replay":
 		return runReplay(args[1:], stdout, stderr)
 	case "version":
@@ -259,6 +266,118 @@ func runReplay(args []string, stdout, stderr io.Writer) int {
 		return exitIO
 	}
 	return exitOK
+}
+
+type mcpOptions struct {
+	rateCount     int64
+	rateWindow    time.Duration
+	maxConcurrent int64
+	callTimeout   time.Duration
+	coalesce      bool
+	tracePath     string
+	cmd           string
+	cmdArgs       []string
+}
+
+func parseMCPArgs(args []string, stderr io.Writer) (mcpOptions, error) {
+	fs := flag.NewFlagSet("quelor mcp", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	rate := fs.String("rate", mcpproxy.DefaultRateSpec, "tool call rate limit as <count>/<duration>")
+	maxConcurrent := fs.Int64("max-concurrent", mcpproxy.DefaultMaxConcurrent, "maximum concurrent tools/call requests")
+	callTimeout := fs.Duration("call-timeout", mcpproxy.DefaultCallTimeout, "longest a tools/call may stay in flight before its capacity is released")
+	coalesce := fs.Bool("coalesce", false, "shed duplicate in-flight tools/call requests")
+	tracePath := fs.String("trace", "", "write JSONL decision trace to file")
+
+	sep := -1
+	for i, a := range args {
+		if a == "--" {
+			sep = i
+			break
+		}
+	}
+	if sep < 0 {
+		if err := fs.Parse(args); err != nil {
+			return mcpOptions{}, err
+		}
+		return mcpOptions{}, fmt.Errorf("missing \"--\" separator before server command")
+	}
+
+	flagArgs := args[:sep]
+	cmdArgs := args[sep+1:]
+	if err := fs.Parse(flagArgs); err != nil {
+		return mcpOptions{}, err
+	}
+	if fs.NArg() > 0 {
+		return mcpOptions{}, fmt.Errorf("unexpected argument %q before \"--\"", fs.Arg(0))
+	}
+	if len(cmdArgs) == 0 {
+		return mcpOptions{}, fmt.Errorf("missing server command after \"--\"")
+	}
+	rateCount, rateWindow, err := mcpproxy.ParseRate(*rate)
+	if err != nil {
+		return mcpOptions{}, err
+	}
+	if *maxConcurrent <= 0 {
+		return mcpOptions{}, fmt.Errorf("--max-concurrent must be > 0")
+	}
+	if *callTimeout <= 0 {
+		return mcpOptions{}, fmt.Errorf("--call-timeout must be > 0")
+	}
+	return mcpOptions{
+		rateCount:     rateCount,
+		rateWindow:    rateWindow,
+		maxConcurrent: *maxConcurrent,
+		callTimeout:   *callTimeout,
+		coalesce:      *coalesce,
+		tracePath:     strings.TrimSpace(*tracePath),
+		cmd:           cmdArgs[0],
+		cmdArgs:       cmdArgs[1:],
+	}, nil
+}
+
+func runMCP(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	opts, err := parseMCPArgs(args, stderr)
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp: %v\n", err)
+		fmt.Fprint(stderr, usageText)
+		return exitUsage
+	}
+	var tw trace.Writer
+	if opts.tracePath != "" {
+		f, err := trace.OpenFile(opts.tracePath)
+		if err != nil {
+			fmt.Fprintf(stderr, "mcp: %v\n", err)
+			return exitIO
+		}
+		tw = f
+	}
+	proxy, err := mcpproxy.New(mcpproxy.Config{
+		RateCount:     opts.rateCount,
+		RateWindow:    opts.rateWindow,
+		MaxConcurrent: opts.maxConcurrent,
+		CallTimeout:   opts.callTimeout,
+		Coalesce:      opts.coalesce,
+		Trace:         tw,
+		Stderr:        stderr,
+	})
+	if err != nil {
+		if tw != nil {
+			_ = tw.Close()
+		}
+		fmt.Fprintf(stderr, "mcp: %v\n", err)
+		return exitIO
+	}
+	defer proxy.Close()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	code, err := proxy.RunCommand(ctx, stdin, stdout, opts.cmd, opts.cmdArgs...)
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp: %v\n", err)
+		return exitIO
+	}
+	return code
 }
 
 func runVersion(args []string, stdout, stderr io.Writer) int {

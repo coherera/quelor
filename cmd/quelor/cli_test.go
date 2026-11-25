@@ -350,3 +350,67 @@ func TestUsage(t *testing.T) {
 		})
 	}
 }
+
+func TestMCPFlagsAndSeparator(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		var errb bytes.Buffer
+		opts, err := parseMCPArgs([]string{"--", "my-mcp-server"}, &errb)
+		if err != nil {
+			t.Fatalf("parseMCPArgs: %v", err)
+		}
+		if opts.rateCount != 30 || opts.rateWindow != time.Minute {
+			t.Fatalf("rate = %d/%v, want 30/1m", opts.rateCount, opts.rateWindow)
+		}
+		if opts.maxConcurrent != 4 || opts.coalesce || opts.tracePath != "" {
+			t.Fatalf("unexpected defaults: %+v", opts)
+		}
+		if opts.cmd != "my-mcp-server" || len(opts.cmdArgs) != 0 {
+			t.Fatalf("cmd = %q %v, want my-mcp-server []", opts.cmd, opts.cmdArgs)
+		}
+	})
+
+	t.Run("all flags", func(t *testing.T) {
+		var errb bytes.Buffer
+		args := []string{
+			"--rate", "12/30s",
+			"--max-concurrent", "2",
+			"--coalesce",
+			"--trace", "/tmp/mcp.jsonl",
+			"--",
+			"npx", "-y", "@modelcontextprotocol/server-github",
+		}
+		opts, err := parseMCPArgs(args, &errb)
+		if err != nil {
+			t.Fatalf("parseMCPArgs: %v", err)
+		}
+		if opts.rateCount != 12 || opts.rateWindow != 30*time.Second {
+			t.Fatalf("rate = %d/%v, want 12/30s", opts.rateCount, opts.rateWindow)
+		}
+		if opts.maxConcurrent != 2 || !opts.coalesce || opts.tracePath != "/tmp/mcp.jsonl" {
+			t.Fatalf("unexpected opts: %+v", opts)
+		}
+		if opts.cmd != "npx" || len(opts.cmdArgs) != 2 || opts.cmdArgs[0] != "-y" || opts.cmdArgs[1] != "@modelcontextprotocol/server-github" {
+			t.Fatalf("cmd = %q %v", opts.cmd, opts.cmdArgs)
+		}
+	})
+
+	t.Run("missing separator", func(t *testing.T) {
+		code, stdout, stderr := execCLI(t, []string{"mcp", "--rate", "10/1m", "my-mcp-server"}, "", nil)
+		if code != exitUsage {
+			t.Fatalf("exit = %d, want %d (stderr=%q)", code, exitUsage, stderr)
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		if !strings.Contains(stderr, "--") {
+			t.Fatalf("stderr = %q, want mention of --", stderr)
+		}
+	})
+
+	t.Run("missing command after separator", func(t *testing.T) {
+		code, stdout, stderr := execCLI(t, []string{"mcp", "--rate", "10/1m", "--"}, "", nil)
+		if code != exitUsage || stdout != "" || stderr == "" {
+			t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+		}
+	})
+}

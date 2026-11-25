@@ -73,6 +73,40 @@ Exit codes are as in "Try it in 2 minutes" above. The Action sets the `verdict` 
 
 **Verdict names.** The engine's lease verdicts (`ADMIT`, `DEFER`, `SHED`, `DENY`; [docs/architecture.md](docs/architecture.md)) and the Action/CLI verdicts (`admit`, `defer`, `degraded`) are separate vocabularies, because the CLI does not run the engine. `admit` and `defer` mean what `ADMIT` and `DEFER` mean; `degraded` is a refusal of a required demand or an unknown reading and has no exact engine twin (closest: `DENY`). `SHED` (dropped by coalescing) exists only in the engine.
 
+## Stop the agent tool stampede: `quelor mcp`
+
+Wrap any stdio MCP server in `.mcp.json` to put Quelor's embedded admission engine in front of every `tools/call`:
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "quelor",
+      "args": [
+        "mcp",
+        "--rate", "30/1m",
+        "--max-concurrent", "4",
+        "--coalesce",
+        "--trace", "mcp.jsonl",
+        "--",
+        "npx", "-y", "@modelcontextprotocol/server-github"
+      ]
+    }
+  }
+}
+```
+
+Stderr from a real run against a stub server with `--rate 2/1m --coalesce` (stdout carries only MCP JSON-RPC protocol bytes):
+
+```text
+[quelor] ADMIT id=1 tool="search_code" reason=ok
+[quelor] SHED id=2 tool="search_code" reason=coalesced:drop-new
+[quelor] ADMIT id=3 tool="search_code" reason=ok
+[quelor] DEFER id=4 tool="search_code" reason=insufficient:mcp_rate
+```
+
+`quelor mcp` brings admission control to agent tools with no daemon: it admits each `tools/call` before the tool runs, enforces a rate window that refills while it runs and a concurrency cap, optionally (`--coalesce`, off by default) sheds duplicate in-flight calls, and backs off automatically via AIMD when a server answers with HTTP 429 or a rate-limit error, regaining capacity as calls succeed. Every `tools/call` is gated or refused; a JSON-RPC batch containing one is refused, so send calls one per message. With `--trace` it records a JSONL decision trace that `quelor replay --trace <file> --decider <decider.yaml>` can read (`--decider` is required); the trace holds up to 512 bytes of each failed call's error text. See [docs/mcp.md](docs/mcp.md) for flags and defaults.
+
 ## What it is
 
 - A **lease API**: `AcquireLease`, `RenewLease`, `SettleLease`. Admit, renew, settle, classify. See [docs/architecture.md](docs/architecture.md).
