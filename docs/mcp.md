@@ -22,7 +22,7 @@ The `--` separator is required before `<server-cmd>`. Everything after `--` is p
 
 ## Behavior
 
-- **Pass-through:** `initialize`, `tools/list`, notifications, responses, and malformed client lines are forwarded verbatim without modification.
+- **Pass-through:** `initialize`, `tools/list`, notifications and responses are forwarded verbatim without modification. A client line that is not exactly one JSON value (invalid JSON, or two objects on one line) is refused with a `-32700` parse error and never forwarded.
 - **Refusals:** When a `tools/call` is not admitted (`DEFER` or `SHED`), it is not sent to the child. The proxy replies directly to the client with an MCP tool result containing `isError: true` and text naming the verdict, reason, and `wake_at` when known.
 - **No ungated `tools/call`:** every `tools/call` is either gated or refused; none reaches the child unchecked.
   - A JSON-RPC **batch** (a JSON array) that contains a `tools/call` is refused with a JSON-RPC error (`-32600`, "batches containing tools/call are not supported"); send each call as its own message. Batches without a `tools/call` pass through.

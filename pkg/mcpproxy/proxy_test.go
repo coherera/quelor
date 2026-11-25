@@ -396,9 +396,8 @@ drained:
 	h.close()
 }
 
-func TestMalformedClientLineForwardedUnchanged(t *testing.T) {
+func TestLineThatIsNotOneJSONValueIsRefused(t *testing.T) {
 	clk := newFakeClock()
-	malformed := "not valid json {{{\n"
 	listReq := `{"jsonrpc":"2.0","id":9,"method":"tools/list"}` + "\n"
 	listResp := `{"jsonrpc":"2.0","id":9,"result":{"tools":[]}}` + "\n"
 
@@ -409,7 +408,20 @@ func TestMalformedClientLineForwardedUnchanged(t *testing.T) {
 		return ""
 	})
 
-	h.send(malformed)
+	bad := []string{
+		"not valid json {{{\n",
+		// A second object on the same line hides a tools/call from a
+		// line-at-a-time reader; a streaming server would still run it.
+		`{"jsonrpc":"2.0","id":1,"method":"ping"}{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"x","arguments":{}}}` + "\n",
+		`{"jsonrpc":"2.0","id":3,"method":"ping"} {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"x","arguments":{}}}` + "\n",
+		`{"jsonrpc":"2.0","id":5,"method":"ping"} trailing` + "\n",
+	}
+	for _, line := range bad {
+		h.send(line)
+		if code, id := h.readError(); code != rpcParseError || id != "null" {
+			t.Fatalf("line %q: got code=%d id=%s, want %d and null", line, code, id, rpcParseError)
+		}
+	}
 	h.send(listReq)
 	if got := h.readLine(); got != listResp {
 		t.Fatalf("tools/list response = %q, want %q", got, listResp)
@@ -417,9 +429,8 @@ func TestMalformedClientLineForwardedUnchanged(t *testing.T) {
 
 	h.close()
 
-	seen := h.serverSeen()
-	if len(seen) != 2 || seen[0] != malformed || seen[1] != listReq {
-		t.Fatalf("child received %q, want [%q, %q]", seen, malformed, listReq)
+	if seen := h.serverSeen(); len(seen) != 1 || seen[0] != listReq {
+		t.Fatalf("child received %q, want only %q", seen, listReq)
 	}
 }
 

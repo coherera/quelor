@@ -347,6 +347,7 @@ func (p *Proxy) pumpClientToServer(ctx context.Context, clientIn io.Reader, clie
 
 // JSON-RPC error codes used for calls the proxy refuses to forward.
 const (
+	rpcParseError     = -32700
 	rpcInvalidRequest = -32600
 	rpcInvalidParams  = -32602
 )
@@ -364,6 +365,14 @@ func (p *Proxy) handleClientLine(ctx context.Context, line []byte, clientOut, se
 	if len(trimmed) == 0 {
 		_, err := serverIn.Write(line)
 		return err
+	}
+
+	if !json.Valid(trimmed) {
+		// A line that is not exactly one JSON value is never forwarded. A
+		// streaming JSON reader in the server could decode a second object
+		// from it, including a tools/call the proxy never saw.
+		p.logf("[quelor] REFUSE reason=parse-error\n")
+		return p.writeRPCError(clientOut, nil, rpcParseError, "quelor: line is not exactly one JSON value")
 	}
 
 	if trimmed[0] == '[' {
