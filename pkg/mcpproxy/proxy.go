@@ -606,9 +606,10 @@ func hasInnerCR(line []byte) bool {
 // two parsers disagree on whether a method is tools/call.
 func methodCharsOK(m string) bool {
 	for i := 0; i < len(m); i++ {
-		c := m[i]
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
-			c == '_' || c == '/' || c == '.' || c == '$' || c == '-') {
+		switch c := m[i]; {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '_', c == '/', c == '.', c == '$', c == '-':
+		default:
 			return false
 		}
 	}
