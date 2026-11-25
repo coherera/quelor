@@ -105,7 +105,7 @@ Stderr from a real run against a stub server with `--rate 2/1m --coalesce` (stdo
 [quelor] DEFER id=4 tool="search_code" reason=insufficient:mcp_rate
 ```
 
-`quelor mcp` brings admission control to agent tools with no daemon: it admits each `tools/call` before the tool runs, enforces a rate window that refills while it runs and a concurrency cap, optionally (`--coalesce`, off by default) sheds duplicate in-flight calls, and backs off automatically via AIMD when a server answers with HTTP 429 or a rate-limit error, regaining capacity as calls succeed. Every `tools/call` is gated or refused; a JSON-RPC batch containing one is refused, so send calls one per message. With `--trace` it records a JSONL decision trace that `quelor replay --trace <file> --decider <decider.yaml>` can read (`--decider` is required); the trace holds up to 512 bytes of each failed call's error text. See [docs/mcp.md](docs/mcp.md) for flags and defaults.
+`quelor mcp` brings admission control to agent tools with no daemon: it admits each `tools/call` before the tool runs, enforces a rate window that refills while it runs and a concurrency cap, optionally (`--coalesce`, off by default) sheds duplicate in-flight calls, and backs off automatically via AIMD when a server answers with HTTP 429 or a rate-limit error, regaining capacity as calls succeed. Every `tools/call` is gated or refused; every JSON-RPC batch is refused, so send calls one per message. With `--trace` it records a JSONL decision trace that `quelor replay --trace <file> --decider <decider.yaml>` can read (`--decider` is required); the trace holds up to 512 bytes of each failed call's error text. See [docs/mcp.md](docs/mcp.md) for flags and defaults.
 
 ## What it is
 

@@ -85,3 +85,30 @@ func TestClientResponseWithAnInFlightIDIsForwarded(t *testing.T) {
 		t.Fatalf("response: child=%q client=%q", in.String(), out.String())
 	}
 }
+
+// A message whose method is empty or not a string, reusing an in-flight id,
+// must not reach the child: a server answering it would settle the call.
+func TestBadMethodWithAnInFlightIDIsRefused(t *testing.T) {
+	for _, m := range []string{`""`, `null`, `123`} {
+		clk := newFakeClock()
+		h := newHarness(t, Config{Clock: clk.Now}, okExcept("7"))
+		h.send(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"x","arguments":{}}}` + "\n")
+		h.send(`{"jsonrpc":"2.0","id":7,"method":` + m + `}` + "\n")
+		if code, _ := h.readError(); code != rpcInvalidRequest {
+			t.Fatalf("method %s: got code %d, want %d", m, code, rpcInvalidRequest)
+		}
+		h.close()
+		if n := len(h.serverSeen()); n != 1 {
+			t.Fatalf("method %s: child received %d lines, want 1: %q", m, n, h.serverSeen())
+		}
+	}
+}
+
+// -0 and 0 are the same id to a server that echoes numbers.
+func TestMinusZeroIDMatchesZero(t *testing.T) {
+	a, _, _, _ := canonicalID(json.RawMessage("0"))
+	b, _, _, _ := canonicalID(json.RawMessage("-0"))
+	if a != b {
+		t.Fatalf("canonical ids differ: %q vs %q", a, b)
+	}
+}

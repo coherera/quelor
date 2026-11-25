@@ -409,7 +409,13 @@ func (p *Proxy) handleClientLine(ctx context.Context, line []byte, clientOut, se
 		return p.writeRPCError(clientOut, obj.echoID(), rpcInvalidRequest, "quelor: request has a reserved key in non-canonical case")
 	}
 
-	method, _ := obj.str("method")
+	method, methodIsString := obj.str("method")
+	if _, has := obj.fields["method"]; has && (!methodIsString || method == "") {
+		// A server may still read this as a request and answer with its id,
+		// which would settle another call's lease.
+		p.logf("[quelor] REFUSE reason=bad-method\n")
+		return p.writeRPCError(clientOut, obj.echoID(), rpcInvalidRequest, "quelor: method must be a non-empty string")
+	}
 	if !methodCharsOK(method) {
 		p.logf("[quelor] REFUSE reason=method-chars\n")
 		return p.writeRPCError(clientOut, obj.echoID(), rpcInvalidRequest, "quelor: method may hold only letters, digits and _ / . $ -")
@@ -824,6 +830,9 @@ func canonicalID(raw json.RawMessage) (key, display string, trimmed json.RawMess
 // so distinct large ids never merge.
 func canonicalNumber(s string) string {
 	if !strings.ContainsAny(s, ".eE") {
+		if s == "-0" {
+			return "0"
+		}
 		return s
 	}
 	f, err := strconv.ParseFloat(s, 64)

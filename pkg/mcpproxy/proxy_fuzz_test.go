@@ -22,6 +22,7 @@ func FuzzNoUngatedToolsCall(f *testing.F) {
 		"{\"meth\xffod\":\"tools/call\"}",
 		`{"METHOD":"tools/call"}`,
 		`{"method":"tools/call "}`,
+		`{"method":"ping"}` + call,
 	} {
 		f.Add([]byte(s))
 	}
@@ -47,13 +48,31 @@ func FuzzNoUngatedToolsCall(f *testing.F) {
 	})
 }
 
-// readsAsCalls counts the tools/call messages some server would read in b.
+// readsAsCalls counts the tools/call messages some server would read in b,
+// including a streaming reader that decodes every value on the line.
 func readsAsCalls(b []byte) int {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	n, values := 0, 0
+	for {
+		var v json.RawMessage
+		if dec.Decode(&v) != nil {
+			break
+		}
+		values++
+		n += readsAsCallsOne(v)
+	}
+	if values > 1 {
+		return n
+	}
+	return readsAsCallsOne(b)
+}
+
+func readsAsCallsOne(b []byte) int {
 	var arr []json.RawMessage
 	if json.Unmarshal(b, &arr) == nil {
 		n := 0
 		for _, e := range arr {
-			n += readsAsCalls(e)
+			n += readsAsCallsOne(e)
 		}
 		return n
 	}
