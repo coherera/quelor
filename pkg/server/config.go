@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,22 +20,24 @@ import (
 
 // Config is the quelord YAML document. Unknown fields are rejected.
 type Config struct {
-	Listen         string                  `yaml:"listen"`
-	Resources      []resource.Manifest     `yaml:"resources"`
-	ResourceFiles  []string                `yaml:"resource_files"`
-	Decider        DeciderConfig           `yaml:"decider"`
-	Shadows        []ShadowConfig          `yaml:"shadows"`
-	TracePath      string                  `yaml:"trace_path"`
-	SharedToken    string                  `yaml:"shared_token"`
-	SharedTokenEnv string                  `yaml:"shared_token_env"`
-	HolderTokens   map[string]string       `yaml:"holder_tokens"`
-	DefaultQuota   engine.Quota            `yaml:"default_quota"`
-	HolderQuotas   map[string]engine.Quota `yaml:"holder_quotas"`
-	LeaseTTL       string                  `yaml:"lease_ttl"`
-	TicketTTL      string                  `yaml:"ticket_ttl"`
-	AgingStep      string                  `yaml:"aging_step"`
-	DeciderTimeout string                  `yaml:"decider_timeout"`
-	Cell           string                  `yaml:"cell"`
+	Listen           string                  `yaml:"listen"`
+	Resources        []resource.Manifest     `yaml:"resources"`
+	ResourceFiles    []string                `yaml:"resource_files"`
+	Decider          DeciderConfig           `yaml:"decider"`
+	Shadows          []ShadowConfig          `yaml:"shadows"`
+	TracePath        string                  `yaml:"trace_path"`
+	SharedToken      string                  `yaml:"shared_token"`
+	SharedTokenEnv   string                  `yaml:"shared_token_env"`
+	HolderTokens     map[string]string       `yaml:"holder_tokens"`
+	HolderTokensFile string                  `yaml:"holder_tokens_file"`
+	HolderTokensEnv  string                  `yaml:"holder_tokens_env"`
+	DefaultQuota     engine.Quota            `yaml:"default_quota"`
+	HolderQuotas     map[string]engine.Quota `yaml:"holder_quotas"`
+	LeaseTTL         string                  `yaml:"lease_ttl"`
+	TicketTTL        string                  `yaml:"ticket_ttl"`
+	AgingStep        string                  `yaml:"aging_step"`
+	DeciderTimeout   string                  `yaml:"decider_timeout"`
+	Cell             string                  `yaml:"cell"`
 }
 
 // DeciderConfig selects the primary decider.
@@ -91,6 +94,10 @@ func (c Config) Build() (*engine.Engine, error) {
 	if err != nil {
 		return nil, err
 	}
+	holderTokens, err := c.holderTokens()
+	if err != nil {
+		return nil, err
+	}
 	dec, err := c.buildDecider()
 	if err != nil {
 		return nil, err
@@ -117,7 +124,7 @@ func (c Config) Build() (*engine.Engine, error) {
 		AgingStep:      durs.aging,
 		DeciderTimeout: durs.decider,
 		SharedToken:    c.sharedToken(),
-		HolderTokens:   c.HolderTokens,
+		HolderTokens:   holderTokens,
 		DefaultQuota:   c.DefaultQuota,
 		HolderQuotas:   c.HolderQuotas,
 		Cell:           c.Cell,
@@ -177,6 +184,81 @@ func (c Config) sharedToken() string {
 		}
 	}
 	return c.SharedToken
+}
+
+// holderTokens merges per-holder tokens from the plaintext holder_tokens map,
+// then holder_tokens_file, then holder_tokens_env. A configured source that
+// cannot be read or parsed, or that yields no entries, is an error so a typo
+// cannot silently disable authentication. Tokens are never logged.
+func (c Config) holderTokens() (map[string]string, error) {
+	out := make(map[string]string)
+	for k, v := range c.HolderTokens {
+		if v != "" {
+			out[k] = v
+		}
+	}
+	if c.HolderTokensFile != "" {
+		b, err := os.ReadFile(c.HolderTokensFile)
+		if err != nil {
+			return nil, fmt.Errorf("holder_tokens_file %s: %w", c.HolderTokensFile, err)
+		}
+		var fromFile map[string]string
+		if err := yaml.Unmarshal(b, &fromFile); err != nil {
+			return nil, fmt.Errorf("holder_tokens_file %s: %w", c.HolderTokensFile, err)
+		}
+		for k, v := range fromFile {
+			if v != "" {
+				out[k] = v
+			}
+		}
+	}
+	if c.HolderTokensEnv != "" {
+		raw, ok := os.LookupEnv(c.HolderTokensEnv)
+		if !ok || raw == "" {
+			return nil, fmt.Errorf("holder_tokens_env %s is not set", c.HolderTokensEnv)
+		}
+		fromEnv := parseHolderTokens(raw)
+		if len(fromEnv) == 0 {
+			return nil, fmt.Errorf("holder_tokens_env %s has no holder tokens", c.HolderTokensEnv)
+		}
+		for k, tok := range fromEnv {
+			out[k] = tok
+		}
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// parseHolderTokens reads holder tokens as a JSON object or as a
+// comma-separated holder:token list.
+func parseHolderTokens(s string) map[string]string {
+	var fromJSON map[string]string
+	if err := json.Unmarshal([]byte(s), &fromJSON); err == nil {
+		out := make(map[string]string, len(fromJSON))
+		for k, v := range fromJSON {
+			if v != "" {
+				out[k] = v
+			}
+		}
+		return out
+	}
+	out := make(map[string]string)
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if i := strings.IndexAny(part, "=:"); i > 0 {
+			key := strings.TrimSpace(part[:i])
+			val := strings.TrimSpace(part[i+1:])
+			if key != "" && val != "" {
+				out[key] = val
+			}
+		}
+	}
+	return out
 }
 
 func (c Config) buildDecider() (decider.Decider, error) {
