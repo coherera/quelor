@@ -71,6 +71,28 @@ func foldKey(s string) string {
 	}, s)
 }
 
+// envelopeKeys and paramsKeys are the keys the proxy reads. A server whose
+// JSON decoder folds key case (Go's encoding/json does) reads "METHOD" or
+// "Method" as "method", while the proxy reads only the exact key, so such a
+// key must be refused rather than passed through.
+var (
+	envelopeKeys = []string{"jsonrpc", "id", "method", "params"}
+	paramsKeys   = []string{"name", "arguments"}
+)
+
+// nonCanonicalKey returns a key that equals one of reserved under case
+// folding but is not spelled exactly like it.
+func (o *object) nonCanonicalKey(reserved []string) (string, bool) {
+	for k := range o.fields {
+		for _, r := range reserved {
+			if k != r && foldKey(k) == foldKey(r) {
+				return k, true
+			}
+		}
+	}
+	return "", false
+}
+
 // hasCollision reports whether any two keys are equal under case folding,
 // exact duplicates included.
 func (o *object) hasCollision() bool { return len(o.collided) > 0 }

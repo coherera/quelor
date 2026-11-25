@@ -399,7 +399,16 @@ func (p *Proxy) handleClientLine(ctx context.Context, line []byte, clientOut, se
 		return p.writeRPCError(clientOut, obj.echoID(), rpcInvalidRequest, "quelor: request has duplicate or case-colliding keys")
 	}
 
+	if k, bad := obj.nonCanonicalKey(envelopeKeys); bad {
+		p.logf("[quelor] REFUSE reason=non-canonical-key key=%q\n", k)
+		return p.writeRPCError(clientOut, obj.echoID(), rpcInvalidRequest, "quelor: request has a reserved key in non-canonical case")
+	}
+
 	method, _ := obj.str("method")
+	if method != "tools/call" && strings.EqualFold(method, "tools/call") {
+		p.logf("[quelor] REFUSE reason=non-canonical-method\n")
+		return p.writeRPCError(clientOut, obj.echoID(), rpcInvalidRequest, "quelor: method must be spelled exactly tools/call")
+	}
 	switch method {
 	case "notifications/cancelled":
 		p.cancelInflight(obj.fields["params"])
@@ -438,6 +447,10 @@ func (p *Proxy) gateToolsCall(ctx context.Context, line []byte, obj *object, cli
 	if pobj.hasCollision() {
 		p.logf("[quelor] REFUSE id=%s reason=key-collision\n", idDisplay)
 		return p.writeRPCError(clientOut, rawID, rpcInvalidRequest, "quelor: tools/call params have duplicate or case-colliding keys")
+	}
+	if k, bad := pobj.nonCanonicalKey(paramsKeys); bad {
+		p.logf("[quelor] REFUSE id=%s reason=non-canonical-key key=%q\n", idDisplay, k)
+		return p.writeRPCError(clientOut, rawID, rpcInvalidParams, "quelor: tools/call params have a reserved key in non-canonical case")
 	}
 
 	p.mu.Lock()
