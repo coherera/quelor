@@ -83,9 +83,11 @@ freshness; a probe error yields an unknown reading and `available` is forced to 
 `quelord` registers every manifest without a reader (`Config.Build` in
 `pkg/server/config.go` states no external readers are attached), so `freshness_ttl` and
 `unknown_policy` matter when you embed the engine and pass readers to
-`resource.Registry.Register`. For a live external reading without a daemon, use
-`quelor admit` against GitHub's rate limits (`github_api`, `github_search`,
-`github_graphql`, `github_code_search`), which reads `/rate_limit` per call.
+`resource.Registry.Register`. For live external readings without a daemon,
+`quelor admit` reads GitHub's rate limits (`github_api`, `github_search`,
+`github_graphql`, `github_code_search`) from `/rate_limit`, or Docker Hub's pull
+budget (`dockerhub_pulls`) from its registry rate-limit headers. Both are read
+live per call; an unknown reading is never available capacity.
 
 ## Runner slots
 

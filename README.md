@@ -23,7 +23,7 @@
 
 ## Try it in 2 minutes
 
-You need Go ([version in go.mod](go.mod)) and a GitHub token.
+You need Go ([version in go.mod](go.mod)). GitHub rate-limit checks need a GitHub token; Docker Hub pull-budget checks are anonymous unless you provide credentials.
 
 ```
 go install github.com/coherera/quelor/cmd/quelor@latest
@@ -42,7 +42,7 @@ Exit codes: `0` admit (enough budget), `42` defer (not enough budget and you pas
 
 CI pipelines and agent sessions start work against budgets they never check: API rate windows, runner slots, model credit windows, dollar caps, and dependencies that are already down. The result is a wall of red that is not defects, paged humans who cannot fix a 429, and reruns that spend the same empty bucket twice.
 
-Quelor admits work against machine resources: API budgets, executor slots, model credit windows, dollar budgets, dependency health. Each resource is declared as a YAML manifest with one of five capacity models ([docs/resource-classes.md](docs/resource-classes.md)). The GitHub Action and `quelor admit` check one live GitHub rate-limit reading, with no daemon; `quelord` holds many resources and arbitrates between many holders.
+Quelor admits work against machine resources: API budgets, executor slots, model credit windows, dollar budgets, dependency health. Each resource is declared as a YAML manifest with one of five capacity models ([docs/resource-classes.md](docs/resource-classes.md)). The GitHub Action and `quelor admit` can check a live GitHub rate-limit or Docker Hub pull-budget reading, with no daemon; `quelord` holds many resources and arbitrates between many holders.
 
 ## Quickstart (GitHub Action)
 
@@ -67,6 +67,27 @@ The same check runs anywhere, with no daemon:
 ```
 $ GITHUB_TOKEN=$(gh auth token) quelor admit --resource github_api --need 50
 admit github_api need=50 remaining=4950 reset=2026-10-31T15:00:00Z
+```
+
+Check Docker Hub's shared pull budget before starting a job:
+
+```
+$ quelor admit --resource dockerhub_pulls --need 1 --optional
+admit dockerhub_pulls need=1 remaining=98 reset=
+```
+
+The anonymous registry budget is checked by default. To use an authenticated account, set `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`; Quelor uses them only to request a short-lived registry token and does not store or print them. Docker Hub does not provide a reset time for this reading, so `reset` stays blank. If the remaining-count header is missing, Quelor treats the reading as unknown and returns `degraded`.
+
+The GitHub Action also accepts optional `dockerhub-username` and `dockerhub-token` inputs. Pass repository or organization secrets when using them:
+
+```yaml
+- uses: coherera/quelor@v0
+  with:
+    resource: dockerhub_pulls
+    need: '1'
+    optional: 'true'
+    dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+    dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
 ```
 
 Exit codes are as in "Try it in 2 minutes" above. The Action sets the `verdict` and `remaining` outputs itself and does not fail the job on `defer` or `degraded` unless you set `fail-on-defer: 'true'`; gate later steps on `steps.gate.outputs.verdict`. If no release binary is available the Action falls back to `go install`, which needs Go on the runner.

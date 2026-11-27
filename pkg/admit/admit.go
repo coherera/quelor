@@ -29,6 +29,9 @@ const exitAdmit = 0
 const exitDefer = 42
 const exitDegraded = 43
 
+// ResourceDockerHubPulls is the Docker Hub pull-budget resource.
+const ResourceDockerHubPulls = "dockerhub_pulls"
+
 // ErrMissingToken means no GitHub token was configured. The rate limit is
 // unknown and must not be treated as available.
 var ErrMissingToken = errors.New("github token is not set")
@@ -41,6 +44,11 @@ func now() time.Time {
 	nowMu.Lock()
 	defer nowMu.Unlock()
 	return nowFn()
+}
+
+// ResourceReader reads one named resource.
+type ResourceReader interface {
+	Read(context.Context, string) (Reading, error)
 }
 
 // Client reads GitHub rate-limit resources.
@@ -225,6 +233,12 @@ func Decide(r Reading, err error, need int64, optional bool) Result {
 		return res
 	}
 	if optional {
+		if r.Reset.IsZero() {
+			res.Verdict = verdictDefer
+			res.Exit = exitDefer
+			res.Reason = fmt.Sprintf("remaining %d < need %d; reset time unavailable", r.Remaining, need)
+			return res
+		}
 		secs := secondsUntil(r.Reset)
 		res.Verdict = verdictDefer
 		res.Exit = exitDefer

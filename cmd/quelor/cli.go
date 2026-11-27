@@ -29,7 +29,7 @@ const exitUsage = 2
 const usageText = `usage: quelor <command> [flags]
 
 commands:
-  admit --resource <github_api|github_search|github_graphql|github_code_search> --need <n> [--optional] [--json] [--api-url <url>]
+  admit --resource <github_api|github_search|github_graphql|github_code_search|dockerhub_pulls> --need <n> [--optional] [--json] [--api-url <url>]
   classify [--exit-code <n>] [--http-status <n>] [--timed-out] [--log-file <path>|-] [--rules <path>]
   mcp [--rate <n>/<dur>] [--max-concurrent <n>] [--call-timeout <dur>] [--coalesce] [--trace <file.jsonl>] -- <server-cmd> [args...]
   replay --trace <file.jsonl> --decider <file.yaml> [--json]
@@ -68,7 +68,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 func runAdmit(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	fs := flag.NewFlagSet("quelor admit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	resource := fs.String("resource", "", "GitHub rate-limit resource (github_api, github_search, github_graphql, github_code_search)")
+	resource := fs.String("resource", "", "resource to check (GitHub rate limits or dockerhub_pulls)")
 	need := fs.Int64("need", 0, "quantity required; must be > 0")
 	optional := fs.Bool("optional", false, "defer instead of degrade when remaining is short")
 	asJSON := fs.Bool("json", false, "print the result as JSON")
@@ -90,11 +90,20 @@ func runAdmit(args []string, stdout, stderr io.Writer, getenv func(string) strin
 	if base == "" {
 		base = strings.TrimSpace(getenv("GITHUB_API_URL"))
 	}
-	client := &admit.Client{
-		BaseURL: base,
-		Token:   strings.TrimSpace(getenv("GITHUB_TOKEN")),
+	resourceName := strings.TrimSpace(*resource)
+	var reader admit.ResourceReader
+	if resourceName == admit.ResourceDockerHubPulls {
+		reader = &admit.DockerHubReader{
+			Username: strings.TrimSpace(getenv("DOCKERHUB_USERNAME")),
+			Token:    strings.TrimSpace(getenv("DOCKERHUB_TOKEN")),
+		}
+	} else {
+		reader = &admit.Client{
+			BaseURL: base,
+			Token:   strings.TrimSpace(getenv("GITHUB_TOKEN")),
+		}
 	}
-	reading, err := client.Read(context.Background(), strings.TrimSpace(*resource))
+	reading, err := reader.Read(context.Background(), resourceName)
 	result := admit.Decide(reading, err, *need, *optional)
 	if werr := result.WriteGitHubOutput(getenv("GITHUB_OUTPUT")); werr != nil {
 		fmt.Fprintf(stderr, "admit: write GITHUB_OUTPUT: %v\n", werr)

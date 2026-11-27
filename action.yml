@@ -6,7 +6,7 @@ branding:
   color: blue
 inputs:
   resource:
-    description: 'Resource to check (github_api, github_search, github_graphql).'
+    description: 'Resource to check (GitHub rate limits or dockerhub_pulls).'
     required: false
     default: 'github_api'
   need:
@@ -20,6 +20,12 @@ inputs:
     description: 'Token used to read GitHub /rate_limit.'
     required: false
     default: ${{ github.token }}
+  dockerhub-username:
+    description: 'Optional Docker Hub username for authenticated pull-budget checks.'
+    required: false
+  dockerhub-token:
+    description: 'Optional Docker Hub access token; used only for the pull-budget check and never stored.'
+    required: false
   version:
     description: 'Quelor release tag to install, such as v0.1.1. The archive is checked against the release checksums and the step fails if they do not match. "latest" is not accepted.'
     required: false
@@ -51,6 +57,8 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
+        DOCKERHUB_USERNAME: ${{ inputs.dockerhub-username }}
+        DOCKERHUB_TOKEN: ${{ inputs.dockerhub-token }}
         Q_RESOURCE: ${{ inputs.resource }}
         Q_NEED: ${{ inputs.need }}
         Q_OPTIONAL: ${{ inputs.optional }}
