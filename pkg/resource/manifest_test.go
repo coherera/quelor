@@ -452,3 +452,34 @@ func sameIDs(got, want []string) bool {
 	}
 	return true
 }
+
+func TestModelCreditExampleManifest(t *testing.T) {
+	ms, err := LoadManifestFile("../../examples/manifests/model-credits.yaml")
+	if err != nil {
+		t.Fatalf("load model credit example: %v", err)
+	}
+	if len(ms) != 2 {
+		t.Fatalf("got %d resources, want 2", len(ms))
+	}
+	want := []Manifest{
+		{
+			ID: "model_credits_monthly", CapacityModel: ModelWindowBucket,
+			Capacity: 20000, Window: Duration(720 * time.Hour),
+			UnknownPolicy: UnknownDeferShort, MinCapacity: 1,
+			FailureThreshold: 3, OpenFor: Duration(30 * time.Second),
+		},
+		{
+			ID: "model_spend_lifetime", CapacityModel: ModelHardBudget,
+			Capacity: 50000, UnknownPolicy: UnknownDeny, MinCapacity: 1,
+			FailureThreshold: 3, OpenFor: Duration(30 * time.Second),
+		},
+	}
+	for i := range want {
+		if ms[i] != want[i] {
+			t.Errorf("resource %d: got %+v, want %+v", i, ms[i], want[i])
+		}
+	}
+	if err := ms[1].Validate(); err != nil {
+		t.Fatalf("hard budget must validate: %v", err)
+	}
+}

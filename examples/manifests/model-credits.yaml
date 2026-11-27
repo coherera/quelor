@@ -1,0 +1,10 @@
+# Engine-local model credit allowances. Values are integer cents.
+resources:
+  - id: model_credits_monthly
+    capacity_model: window_bucket
+    capacity: 20000
+    window: 720h
+  - id: model_spend_lifetime
+    capacity_model: hard_budget
+    capacity: 50000
+    unknown_policy: deny

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -290,5 +291,46 @@ func TestAuthenticateSharedTokenOnly(t *testing.T) {
 	}, nil, func(cfg *Config) { cfg.SharedToken = "shared" })
 	if !e.Authenticate("anyone", "shared") || e.Authenticate("anyone", "nope") || e.Authenticate("anyone", "") {
 		t.Fatal("shared token handling changed")
+	}
+}
+
+func TestModelCreditHardBudgetDeniesUnknownReading(t *testing.T) {
+	reg := resource.NewRegistry(nil)
+	manifest := resource.Manifest{
+		ID:            "model_spend_lifetime",
+		CapacityModel: resource.ModelHardBudget,
+		Capacity:      50000,
+		UnknownPolicy: resource.UnknownDeny,
+	}
+	reader := resource.FuncReader(func(context.Context) (quelor.Reading, error) {
+		return quelor.Reading{Known: false}, errors.New("provider reading unavailable")
+	})
+	if err := reg.Register(manifest, reader); err != nil {
+		t.Fatalf("register hard budget: %v", err)
+	}
+
+	e, err := New(Config{Registry: reg, Decider: admitAll()})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	defer func() {
+		if err := e.Close(); err != nil {
+			t.Errorf("close engine: %v", err)
+		}
+	}()
+
+	result, err := e.AcquireLease(context.Background(), quelor.AcquireRequest{
+		Envelope: work("model-credit-unknown-reading", "ci-smoke", map[string]int64{
+			"model_spend_lifetime": 1000,
+		}, quelor.PriorityChange),
+	})
+	if err != nil {
+		t.Fatalf("acquire with unknown hard-budget reading: %v", err)
+	}
+	if result.Verdict.Kind != quelor.Deny || result.Verdict.Reason != "unknown-reading:model_spend_lifetime" {
+		t.Fatalf("unknown hard-budget reading was not denied: %+v", result.Verdict)
+	}
+	if result.Lease != nil {
+		t.Fatalf("denied acquire returned a lease: %+v", result.Lease)
 	}
 }
