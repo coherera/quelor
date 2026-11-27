@@ -399,5 +399,23 @@
   "log": "AssertionError: expected \"toomanyrequests: You have reached your pull rate limit.\"",
   "want_class": "real-defect",
   "want_rule": "gha-real-defect"
+ },
+ {
+  "name": "docker hub pull rate limit reversed",
+  "log": "pull rate limit: toomanyrequests",
+  "want_class": "resource-exhausted",
+  "want_rule": "gha-docker-pull-limit"
+ },
+ {
+  "name": "docker hub unrelated toomanyrequests",
+  "log": "toomanyrequests: unrelated error message",
+  "want_class": "unknown",
+  "want_rule": ""
+ },
+ {
+  "name": "docker hub unrelated pull rate limit",
+  "log": "pull rate limit telemetry refreshed for registry client",
+  "want_class": "unknown",
+  "want_rule": ""
  }
 ]
